@@ -44,7 +44,7 @@ def log(*a):
 def http_get(url: str, params: dict | None = None, headers: dict | None = None,
              retries: int = 5, timeout: int = 60) -> bytes:
     if params:
-        url = url + "?" + urllib.parse.urlencode(params)
+        url = url + "?" + urllib.parse.urlencode(params, safe=":")
     h = {"User-Agent": C.USER_AGENT, "Accept-Encoding": "gzip"}
     h.update(headers or {})
     last = None
@@ -63,7 +63,8 @@ def http_get(url: str, params: dict | None = None, headers: dict | None = None,
                 log(f"  HTTP {e.code} en {url[:80]}… reintento en {wait}s")
                 time.sleep(wait)
                 continue
-            raise
+            msg = e.headers.get("message") if e.headers else None
+            raise RuntimeError(f"HTTP {e.code} {e.reason}" + (f" – {msg}" if msg else "") + f" ({url[:160]})") from None
         except Exception as e:  # timeouts, conexión, etc.
             last = e
             wait = 5 * (attempt + 1)
@@ -285,7 +286,7 @@ def sync_nvd(meta: dict, store: MonthStore, force_backfill: bool) -> list[str]:
         log(f"NVD: carga inicial por fecha de publicación desde {since:%Y-%m-%d}")
         for a, b in windows(since, NOW):
             log(f" ventana {a:%Y-%m-%d} → {b:%Y-%m-%d}")
-            for it in nvd_pages({"pubStartDate": iso(a) + ".000+00:00", "pubEndDate": iso(b) + ".000+00:00"}):
+            for it in nvd_pages({"pubStartDate": iso(a), "pubEndDate": iso(b)}):
                 handle(it)
             store.save()  # guardar progreso por si se corta
         if force_backfill and last:
@@ -298,7 +299,7 @@ def sync_nvd(meta: dict, store: MonthStore, force_backfill: bool) -> list[str]:
     if since:
         log(f"NVD: cambios desde {since:%Y-%m-%d %H:%M} UTC")
         for a, b in windows(since, NOW):
-            for it in nvd_pages({"lastModStartDate": iso(a) + ".000+00:00", "lastModEndDate": iso(b) + ".000+00:00"}):
+            for it in nvd_pages({"lastModStartDate": iso(a), "lastModEndDate": iso(b)}):
                 handle(it)
 
     meta["nvd_last_sync"] = iso(NOW)
@@ -620,7 +621,12 @@ def sync_news() -> list[dict]:
     cutoff = iso(NOW - timedelta(days=C.NEWS_MAX_AGE_DAYS))
     news = [n for n in by_link.values() if n["date"] >= cutoff]
     news.sort(key=lambda n: n["date"], reverse=True)
-    news = news[:C.NEWS_MAX]
+    per_source, kept = {}, []
+    for n in news:  # que ninguna fuente acapare el listado
+        per_source[n["source"]] = per_source.get(n["source"], 0) + 1
+        if per_source[n["source"]] <= C.NEWS_MAX_PER_SOURCE:
+            kept.append(n)
+    news = kept[:C.NEWS_MAX]
     write_json(C.DATA / "news.json", news)
     log(f"Noticias: {len(news)} guardadas ({ok}/{len(C.NEWS_FEEDS)} fuentes OK)")
     return news

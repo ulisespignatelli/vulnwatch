@@ -47,6 +47,7 @@ NEWS_FEEDS = [
     ("WeLiveSecurity (ES)", "https://www.welivesecurity.com/es/rss/feed/"),
 ]
 NEWS_MAX = 600            # cuántas noticias se guardan
+NEWS_MAX_PER_SOURCE = 60  # máximo por fuente (algunos feeds publican cientos)
 NEWS_MAX_AGE_DAYS = 60
 
 # --- Alertas Telegram (opcionales) --------------------------------------

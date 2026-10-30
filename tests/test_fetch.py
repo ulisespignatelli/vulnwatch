@@ -59,6 +59,28 @@ class TestNVD(unittest.TestCase):
         self.assertEqual(F.pick_cvss(m)["cvss_version"], "4.0")
         self.assertEqual(F.pick_cvss({})["severity"], "NONE")
 
+    def test_nvd_query_keeps_colons(self):
+        # la NVD responde 404 si los ":" de las fechas llegan codificados como %3A
+        seen = {}
+
+        class Resp:
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def read(self): return b"{}"
+
+        def fake_urlopen(req, timeout=0):
+            seen["url"] = req.full_url
+            return Resp()
+        old = F.urllib.request.urlopen
+        F.urllib.request.urlopen = fake_urlopen
+        try:
+            F.http_get(C.NVD_API, {"pubStartDate": "2025-01-01T00:00:00", "pubEndDate": "2025-04-01T00:00:00"})
+        finally:
+            F.urllib.request.urlopen = old
+        self.assertIn("pubStartDate=2025-01-01T00:00:00&", seen["url"])
+        self.assertNotIn("%3A", seen["url"])
+
     def test_windows_respect_nvd_limit(self):
         a = F.parse_dt("2025-01-01T00:00:00")
         b = F.parse_dt("2025-12-31T00:00:00")
@@ -103,6 +125,12 @@ class TestFeeds(unittest.TestCase):
         n = F.parse_feed("Atom", xml)[0]
         self.assertEqual(n["link"], "https://n.example/2")
         self.assertEqual(n["cves"], ["CVE-2025-0001"])
+
+
+class TestNewsCap(unittest.TestCase):
+    def test_per_source_cap(self):
+        self.assertGreater(C.NEWS_MAX_PER_SOURCE, 0)
+        self.assertLessEqual(C.NEWS_MAX_PER_SOURCE, C.NEWS_MAX)
 
 
 class TestStore(unittest.TestCase):
