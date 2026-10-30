@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VulnWatch · Vulnerabilidades del día</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2300d4a4'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/hoy">
+    <svg viewBox="0 0 32 32" width="26" height="26"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z" fill="currentColor"/><path d="m11 16 3.5 3.5L21 13" stroke="#0b0f17" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Vuln<b>Watch</b></span>
+  </a>
+  <nav id="nav">
+    <a href="#/hoy" data-r="hoy">Hoy</a>
+    <a href="#/cves" data-r="cves">Vulnerabilidades</a>
+    <a href="#/kev" data-r="kev">Explotadas (KEV)</a>
+    <a href="#/noticias" data-r="noticias">Noticias</a>
+    <a href="#/config" data-r="config">Mi lista</a>
+  </nav>
+  <form id="gsearch" class="gsearch" autocomplete="off">
+    <input id="gq" type="search" placeholder="Buscar CVE, producto, palabra…  ( / )">
+  </form>
+  <div id="updated" class="updated"></div>
+</header>
+<main id="app"><div class="loading">Cargando datos…</div></main>
+<div id="modal" class="modal" hidden><div class="modal-card" role="dialog" aria-modal="true"><button class="x" id="mclose" aria-label="Cerrar">×</button><div id="mbody"></div></div></div>
+<footer class="foot">Datos: <a href="https://nvd.nist.gov" target="_blank" rel="noopener">NVD</a> · <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener">CISA KEV</a> · <a href="https://www.first.org/epss/" target="_blank" rel="noopener">FIRST EPSS</a> · <a href="https://www.cve.org" target="_blank" rel="noopener">CVE.org</a> · fuentes RSS. Se actualiza automáticamente cada hora.</footer>
+<script src="app.js"></script>
+</body>
+</html>

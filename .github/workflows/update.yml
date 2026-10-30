@@ -1,0 +1,88 @@
+name: Actualizar datos y publicar
+
+on:
+  schedule:
+    - cron: "17 * * * *"       # cada hora (GitHub puede demorarla unos minutos)
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Recargar historial completo desde 'backfill_from'"
+        type: boolean
+        default: false
+      backfill_from:
+        description: "Fecha de inicio para la recarga (AAAA-MM-DD). Ej: 2020-01-01"
+        type: string
+        default: ""
+
+permissions:
+  actions: write
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: vulnwatch
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    # si algo falla, GitHub te manda un email automáticamente
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restaurar datos anteriores (rama 'data')
+        run: |
+          mkdir -p site/data
+          if git ls-remote --exit-code --heads origin data >/dev/null; then
+            git fetch --depth 1 origin data
+            git archive FETCH_HEAD | tar -x -C site/data
+            echo "Datos restaurados: $(ls site/data/cves | wc -l) meses"
+          else
+            echo "Primera ejecución: se hará la carga inicial"
+          fi
+
+      - name: Descargar vulnerabilidades, KEV, EPSS y noticias
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WATCHLIST: ${{ vars.WATCHLIST }}
+          BACKFILL_FROM: ${{ inputs.backfill_from || vars.BACKFILL_FROM }}
+        run: |
+          ARGS="--site-url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          if [ "${{ inputs.backfill }}" = "true" ]; then ARGS="$ARGS --backfill"; fi
+          python scripts/fetch.py $ARGS
+
+      - name: Guardar datos en la rama 'data'
+        run: |
+          cd site/data
+          git init -q -b data
+          git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Datos $(date -u +%FT%TZ)"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          rm -rf .git
+
+      - name: Mantener activa la tarea programada
+        # GitHub desactiva los cron tras 60 días sin actividad; esto la re-habilita sola.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/update.yml/enable" || true
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
