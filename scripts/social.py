@@ -222,6 +222,30 @@ def _graph(url, params):
         return json.loads(r.read().decode())
 
 
+def _graph_get(url, params):
+    full = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(full)   # GET
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=60, context=ctx) as r:
+        return json.loads(r.read().decode())
+
+
+def _wait_container_ready(base, container_id, token, tries=20, pause=4):
+    """Espera a que un contenedor de media de Instagram termine de procesarse (status FINISHED)."""
+    for _ in range(tries):
+        try:
+            st = _graph_get(f"{base}/{container_id}", {"fields": "status_code", "access_token": token})
+        except urllib.error.HTTPError:
+            time.sleep(pause); continue
+        code = st.get("status_code")
+        if code == "FINISHED":
+            return True
+        if code == "ERROR":
+            raise RuntimeError(f"contenedor {container_id} en ERROR: {st}")
+        time.sleep(pause)
+    return False
+
+
 def publish_instagram(ig_user_id, token, image_url, caption):
     """Publica una foto en el feed de Instagram vía Graph API (cuenta Business/Creator).
        image_url debe ser una URL pública a un JPEG. Devuelve el id del post.
@@ -702,6 +726,7 @@ def publish_instagram_carousel(ig_user_id, token, image_urls, caption):
                        {"image_url": u, "is_carousel_item": "true", "access_token": token})
             if not c.get("id"):
                 raise RuntimeError(f"hijo del carrusel sin id: {c}")
+            _wait_container_ready(base, c["id"], token)   # esperar a que la imagen hija procese
             children.append(c["id"])
         cont = _graph(f"{base}/{ig_user_id}/media",
                       {"media_type": "CAROUSEL", "children": ",".join(children),
@@ -709,9 +734,20 @@ def publish_instagram_carousel(ig_user_id, token, image_urls, caption):
         cid = cont.get("id")
         if not cid:
             raise RuntimeError(f"carrusel sin creation_id: {cont}")
-        out = _graph(f"{base}/{ig_user_id}/media_publish",
-                     {"creation_id": cid, "access_token": token})
-        return out.get("id")
+        # Esperar a que el contenedor del carrusel esté listo antes de publicar (evita el error 9007).
+        _wait_container_ready(base, cid, token)
+        last = None
+        for _ in range(6):   # reintentos cortos por si aún dice "no está listo"
+            try:
+                out = _graph(f"{base}/{ig_user_id}/media_publish",
+                             {"creation_id": cid, "access_token": token})
+                return out.get("id")
+            except urllib.error.HTTPError as e:
+                last = e.read().decode(errors="replace")[:300]
+                if "2207027" in last or "not ready" in last or "9007" in last:
+                    time.sleep(5); continue
+                raise RuntimeError(f"HTTP {e.code}: {last}") from None
+        raise RuntimeError(f"no se pudo publicar tras reintentos: {last}")
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:300]
         raise RuntimeError(f"HTTP {e.code}: {detail}") from None
