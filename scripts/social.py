@@ -855,7 +855,19 @@ def deepdive(phase, base_url="", site_url=""):
 # No necesita URLs públicas: sube los bytes directo por la API.
 
 LI_BASE = "https://api.linkedin.com/rest"
-LI_VERSION = os.environ.get("LI_VERSION", "").strip() or "202505"
+
+
+def _default_li_version():
+    """Versión de la API de LinkedIn (formato AAAAMM). Usa el mes anterior,
+    que siempre está activo (LinkedIn mantiene ~12 meses). Se actualiza sola."""
+    d = datetime.now(timezone.utc)
+    y, m = d.year, d.month - 1
+    if m == 0:
+        y, m = y - 1, 12
+    return f"{y}{m:02d}"
+
+
+LI_VERSION = os.environ.get("LI_VERSION", "").strip() or _default_li_version()
 _LI_RESERVED = set("\\|{}@[]()<>#*_~")
 
 
