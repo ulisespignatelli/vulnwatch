@@ -924,19 +924,22 @@ def _li_json(url, token, payload):
         raise RuntimeError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
 
 
-def _li_upload(upload_url, token, path):
+def _li_upload(upload_url, token, path, mime="application/octet-stream"):
     data = open(path, "rb").read()
     req = urllib.request.Request(upload_url, data=data, method="PUT",
-                                 headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=180, context=ssl.create_default_context()) as r:
-        return r.status in (200, 201)
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": mime})
+    try:
+        with urllib.request.urlopen(req, timeout=180, context=ssl.create_default_context()) as r:
+            return r.status in (200, 201)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"subida HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
 
 
 def li_upload_image(token, owner, path):
     init = _li_json(f"{LI_BASE}/images?action=initializeUpload", token,
                     {"initializeUploadRequest": {"owner": owner}})
     v = init.get("value", {})
-    _li_upload(v["uploadUrl"], token, path)
+    _li_upload(v["uploadUrl"], token, path, mime="image/jpeg")
     return v["image"]
 
 
@@ -944,7 +947,7 @@ def li_upload_document(token, owner, path):
     init = _li_json(f"{LI_BASE}/documents?action=initializeUpload", token,
                     {"initializeUploadRequest": {"owner": owner}})
     v = init.get("value", {})
-    _li_upload(v["uploadUrl"], token, path)
+    _li_upload(v["uploadUrl"], token, path, mime="application/pdf")
     return v["document"]
 
 
