@@ -15,6 +15,7 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -302,6 +303,11 @@ def _esc_html(s):
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _wrap_cves(text):
+    """Envuelve los IDs de CVE en <code> para que Telegram no los convierta en links de teléfono."""
+    return re.sub(r"(CVE-\d{4}-\d+)", r"<code>\1</code>", text)
+
+
 def sync_news_telegram(max_per_run=6):
     """Publica en Telegram SOLO las noticias nuevas (no publicadas antes).
     En la primera corrida marca todo lo actual como visto, para no mandar el backlog."""
@@ -326,8 +332,10 @@ def sync_news_telegram(max_per_run=6):
     sent = 0
     for n in nuevas[:max_per_run]:
         cves = " ".join(n.get("cves", [])[:4])
-        extra = f" · {_esc_html(cves)}" if cves else ""
-        msg = f"📰 <b>{_esc_html(n['title'])}</b>\n{_esc_html(n.get('source', ''))}{extra}\n{n['link']}"
+        extra = f"\n🔖 <code>{_esc_html(cves)}</code>" if cves else ""
+        title = _esc_html(n["title"])
+        src = _esc_html(n.get("source", ""))
+        msg = f'📰 <b><a href="{n["link"]}">{title}</a></b>\n🗞 <i>{src}</i>{extra}'
         try:
             send_telegram_message(token, chat, msg)
             posted.append(n["link"]); seen.add(n["link"]); sent += 1
@@ -398,24 +406,29 @@ def sync_cves_telegram(site_url="", max_per_run=40, pause=1.5):
     base = (site_url or "").rstrip("/")
     sent = 0
     for r in nuevas[:cap]:
-        tags = []
-        if r.get("kev") or r.get("exploit") == "active":
-            tags.append("🔴 EXPLOTADA")
-        if r.get("exploit") == "poc":
-            tags.append("🟠 PoC público")
-        if r.get("ransomware"):
-            tags.append("🟣 Ransomware")
         sev = (r.get("severity") or "").upper()
-        sev_icon = {"CRITICAL": "🔴 Crítica", "HIGH": "🟠 Alta",
-                    "MEDIUM": "🟡 Media", "LOW": "🟢 Baja"}.get(sev, "⚪ Sin severidad")
-        if not tags:
-            tags.append(sev_icon)
-        tag = " · ".join(tags)
+        ball, word = {
+            "CRITICAL": ("🔴", "CRÍTICA"), "HIGH": ("🟠", "ALTA"),
+            "MEDIUM": ("🟡", "MEDIA"), "LOW": ("🟢", "BAJA"),
+        }.get(sev, ("⚪", "SIN SEVERIDAD"))
         score = r.get("score")
-        head = f"🛡️ <b>{_esc_html(r['id'])}</b>" + (f" — CVSS {score}" if score is not None else "")
-        desc = _esc_html((r.get("desc_es") or r.get("desc") or "")[:220])
+        señales = []
+        if r.get("kev") or r.get("exploit") == "active":
+            señales.append("🔥 Explotada")
+        if r.get("exploit") == "poc":
+            señales.append("🧪 PoC público")
+        if r.get("ransomware"):
+            señales.append("🦠 Ransomware")
+        linea1 = f"{ball} <b>{word}</b>" + (f"  ·  CVSS {score}" if score is not None else "")
+        if señales:
+            linea1 += "  ·  " + "  ·  ".join(señales)
+        cid = _esc_html(r["id"])
         link = f"{base}/#/cve/{r['id']}" if base else ""
-        msg = f"{head}\n{tag}\n\n{desc}" + (f"\n\n🔗 {link}" if link else "")
+        titulo = f'🛡️ <b><a href="{link}">{cid}</a></b>' if link else f"🛡️ <b><code>{cid}</code></b>"
+        desc = _esc_html((r.get("desc_es") or r.get("desc") or "")[:230])
+        prods = r.get("products") or []
+        prod_line = f"\n\n📦 <i>{_esc_html(prods[0])}</i>" if prods else ""
+        msg = f"{linea1}\n{titulo}\n\n{desc}{prod_line}"
         try:
             send_telegram_message(token, chat, msg, preview=False)
             posted.append(r["id"]); seen.add(r["id"]); sent += 1
