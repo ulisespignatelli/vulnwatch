@@ -224,7 +224,7 @@ def _graph(url, params):
 def publish_instagram(ig_user_id, token, image_url, caption):
     """Publica una foto en el feed de Instagram vía Graph API (cuenta Business/Creator).
        image_url debe ser una URL pública a un JPEG. Devuelve el id del post."""
-    base = "https://graph.facebook.com/v21.0"
+    base = "https://graph.instagram.com/v21.0"
     try:
         container = _graph(f"{base}/{ig_user_id}/media",
                            {"image_url": image_url, "caption": caption[:2200], "access_token": token})
