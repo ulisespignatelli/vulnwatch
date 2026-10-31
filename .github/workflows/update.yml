@@ -2,7 +2,7 @@ name: Actualizar datos y publicar
 
 on:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "17 * * * *"       # cada hora (GitHub puede demorarla unos minutos)
   push:
     branches: [main]
   workflow_dispatch:
@@ -15,6 +15,10 @@ on:
         description: "Fecha de inicio para la recarga (AAAA-MM-DD). Ej: 2020-01-01"
         type: string
         default: ""
+      force_deepdive:
+        description: "Forzar un deep-dive en Instagram ahora (para probar, ignora el horario)"
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -30,6 +34,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 340
+    # si algo falla, GitHub te manda un email automáticamente
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -73,6 +78,7 @@ jobs:
           SOCIAL_HANDLE: ${{ vars.SOCIAL_HANDLE }}
         run: |
           ARGS="--site-url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          # publicar en Telegram solo en la hora elegida (UTC). SOCIAL_HOUR por defecto 12 (~09:00 ART).
           HOUR=$(date -u +%H)
           SLOT="${{ vars.SOCIAL_HOUR }}"; SLOT="${SLOT:-12}"
           if [ "$HOUR" = "$SLOT" ]; then ARGS="$ARGS --telegram"; fi
@@ -101,8 +107,54 @@ jobs:
           if [ -z "$IG_USER_ID" ] || [ -z "$IG_ACCESS_TOKEN" ]; then echo "Instagram no configurado (opcional)"; exit 0; fi
           URL="https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.savedata.outputs.sha }}/social/today.jpg"
           python scripts/social.py --instagram --image-url "$URL" || echo "instagram: omitido"
+          # Persistir el estado de Instagram (social/posted_ig.json) en la rama 'data',
+          # para no repetir la misma tarjeta en la próxima corrida.
+          cd site/data
+          git init -q -b data
+          git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Estado IG $(date -u +%FT%TZ)" || echo "sin cambios"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          rm -rf .git
+
+      - name: Deep-dive educativo en Instagram (carrusel, 3 veces al día)
+        if: success()
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: |
+          if [ "${{ inputs.force_deepdive }}" != "true" ]; then
+            HOUR=$(date -u +%H)
+            HOURS="${{ vars.DEEPDIVE_HOURS }}"; HOURS="${HOURS:-13,18,23}"   # UTC (≈10, 15, 20 ART)
+            case ",$HOURS," in *",$HOUR,"*) : ;; *) echo "fuera de las horas de deep-dive"; exit 0 ;; esac
+          else
+            echo "deep-dive forzado manualmente"
+          fi
+          if [ -z "$IG_USER_ID" ] || [ -z "$IG_ACCESS_TOKEN" ]; then echo "Instagram no configurado (opcional)"; exit 0; fi
+          # 1) preparar: elegir la próxima CVE y generar las 4 placas del carrusel
+          python scripts/social.py --deepdive --phase prepare || { echo "deep: nada que preparar"; exit 0; }
+          [ -f site/data/social/deep_pending.json ] || { echo "deep: sin CVE que califique hoy"; exit 0; }
+          # 2) commit a la rama 'data' para tener URLs públicas de las placas
+          cd site/data
+          git init -q -b data
+          git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Deep-dive placas $(date -u +%FT%TZ)" || echo "sin cambios"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          DDSHA=$(git rev-parse HEAD)
+          rm -rf .git
+          cd ../..
+          BASE="https://raw.githubusercontent.com/${{ github.repository }}/$DDSHA/"
+          # 3) publicar el carrusel en Instagram
+          python scripts/social.py --deepdive --phase publish --base-url "$BASE" || echo "deep: publicación omitida"
+          # 4) persistir el estado (social/posted_deepdives.json) para no repetir la misma CVE
+          cd site/data
+          git init -q -b data
+          git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Deep-dive estado $(date -u +%FT%TZ)" || echo "sin cambios"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          rm -rf .git
 
       - name: Mantener activa la tarea programada
+        # GitHub desactiva los cron tras 60 días sin actividad; esto la re-habilita sola.
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
