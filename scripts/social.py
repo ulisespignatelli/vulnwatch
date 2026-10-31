@@ -223,8 +223,9 @@ def _graph(url, params):
 
 def publish_instagram(ig_user_id, token, image_url, caption):
     """Publica una foto en el feed de Instagram vía Graph API (cuenta Business/Creator).
-       image_url debe ser una URL pública a un JPEG. Devuelve el id del post."""
-    base = "https://graph.facebook.com/v21.0"
+       image_url debe ser una URL pública a un JPEG. Devuelve el id del post.
+       El servidor se puede cambiar con la variable IG_API_BASE (por defecto el de Instagram Login)."""
+    base = os.environ.get("IG_API_BASE", "").strip() or "https://graph.facebook.com/v21.0"
     try:
         container = _graph(f"{base}/{ig_user_id}/media",
                            {"image_url": image_url, "caption": caption[:2200], "access_token": token})
@@ -237,6 +238,58 @@ def publish_instagram(ig_user_id, token, image_url, caption):
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:300]
         raise RuntimeError(f"HTTP {e.code}: {detail}") from None
+
+
+def send_telegram_message(token, chat_id, text, preview=True):
+    """Envía un mensaje de texto a Telegram (con o sin vista previa del link)."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    body = urllib.parse.urlencode({
+        "chat_id": chat_id, "text": text[:4000], "parse_mode": "HTML",
+        "disable_web_page_preview": "false" if preview else "true",
+    }).encode()
+    req = urllib.request.Request(url, data=body)
+    with urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context()) as r:
+        return r.status == 200
+
+
+def _esc_html(s):
+    return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def sync_news_telegram(max_per_run=6):
+    """Publica en Telegram SOLO las noticias nuevas (no publicadas antes).
+    En la primera corrida marca todo lo actual como visto, para no mandar el backlog."""
+    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not (token and chat):
+        return
+    news = read_json(DATA / "news.json", [])
+    if not news:
+        return
+    OUT.mkdir(parents=True, exist_ok=True)
+    state = OUT / "posted_news.json"
+    links_now = [n["link"] for n in news if n.get("link")]
+    if not state.exists():   # primera corrida: sembrar sin publicar
+        state.write_text(json.dumps(links_now[:2000], ensure_ascii=False), encoding="utf-8")
+        print("news: primera corrida — marcadas como vistas, sin publicar")
+        return
+    posted = read_json(state, [])
+    seen = set(posted)
+    nuevas = [n for n in news if n.get("link") and n["link"] not in seen]
+    nuevas.sort(key=lambda n: n.get("date", ""))   # de la más vieja a la más nueva
+    sent = 0
+    for n in nuevas[:max_per_run]:
+        cves = " ".join(n.get("cves", [])[:4])
+        extra = f" · {_esc_html(cves)}" if cves else ""
+        msg = f"📰 <b>{_esc_html(n['title'])}</b>\n{_esc_html(n.get('source', ''))}{extra}\n{n['link']}"
+        try:
+            send_telegram_message(token, chat, msg)
+            posted.append(n["link"]); seen.add(n["link"]); sent += 1
+        except Exception as e:
+            print(f"news: fallo al publicar: {e}")
+            break
+    state.write_text(json.dumps(posted[-3000:], ensure_ascii=False), encoding="utf-8")
+    print(f"news: {sent} noticia(s) nueva(s) publicada(s) en Telegram ({len(nuevas)} pendientes en total)")
 
 
 def send_telegram_photo(token, chat_id, img_path, caption):
@@ -298,6 +351,10 @@ def main():
                 print(f"social: fallo al publicar en Telegram: {e}")
         else:
             print("social: Telegram no configurado (faltan TELEGRAM_TOKEN / TELEGRAM_CHAT_ID)")
+
+    # Noticias nuevas → Telegram. Corre en el paso de la placa (cada hora), no en el de Instagram.
+    if not a.instagram:
+        sync_news_telegram()
 
     if a.instagram:
         ig_id = os.environ.get("IG_USER_ID", "").strip()
