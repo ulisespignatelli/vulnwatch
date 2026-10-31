@@ -19,6 +19,10 @@ on:
         description: "Forzar un deep-dive en Instagram ahora (para probar, ignora el horario)"
         type: boolean
         default: false
+      force_linkedin:
+        description: "Forzar publicación en LinkedIn ahora (resumen + deep-dive, para probar)"
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -153,6 +157,50 @@ jobs:
           git init -q -b data
           git add -A
           git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Deep-dive estado $(date -u +%FT%TZ)" || echo "sin cambios"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          rm -rf .git
+
+      - name: LinkedIn — resumen del día (perfil personal, 1 vez al día)
+        if: success()
+        env:
+          LI_ACCESS_TOKEN: ${{ secrets.LI_ACCESS_TOKEN }}
+          LI_REFRESH_TOKEN: ${{ secrets.LI_REFRESH_TOKEN }}
+          LI_CLIENT_SECRET: ${{ secrets.LI_CLIENT_SECRET }}
+          LI_PERSON_URN: ${{ secrets.LI_PERSON_URN }}
+          LI_VERSION: ${{ vars.LI_VERSION }}
+        run: |
+          if [ "${{ inputs.force_linkedin }}" != "true" ]; then
+            HOUR=$(date -u +%H); SLOT="${{ vars.SOCIAL_HOUR }}"; SLOT="${SLOT:-12}"
+            if [ "$HOUR" != "$SLOT" ]; then echo "fuera de la hora del resumen de LinkedIn"; exit 0; fi
+          fi
+          if [ -z "$LI_ACCESS_TOKEN" ] || [ -z "$LI_PERSON_URN" ]; then echo "LinkedIn no configurado (opcional)"; exit 0; fi
+          python scripts/social.py --linkedin --kind summary || echo "linkedin resumen: omitido"
+          cd site/data
+          git init -q -b data; git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "LinkedIn estado $(date -u +%FT%TZ)" || echo "sin cambios"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          rm -rf .git
+
+      - name: LinkedIn — deep-dive PDF (perfil personal, 1 vez al día)
+        if: success()
+        env:
+          LI_ACCESS_TOKEN: ${{ secrets.LI_ACCESS_TOKEN }}
+          LI_REFRESH_TOKEN: ${{ secrets.LI_REFRESH_TOKEN }}
+          LI_CLIENT_SECRET: ${{ secrets.LI_CLIENT_SECRET }}
+          LI_PERSON_URN: ${{ secrets.LI_PERSON_URN }}
+          LI_VERSION: ${{ vars.LI_VERSION }}
+        run: |
+          if [ "${{ inputs.force_linkedin }}" != "true" ]; then
+            HOUR=$(date -u +%H); MIN=$((10#$(date -u +%M)))
+            SLOT="${{ vars.LI_DEEPDIVE_HOUR }}"; SLOT="${SLOT:-18}"   # UTC (≈15 ART)
+            if [ "$HOUR" != "$SLOT" ]; then echo "fuera de la hora del deep-dive de LinkedIn"; exit 0; fi
+            if [ "$MIN" -ge 30 ]; then echo "segunda corrida de la hora; ya salió"; exit 0; fi
+          fi
+          if [ -z "$LI_ACCESS_TOKEN" ] || [ -z "$LI_PERSON_URN" ]; then echo "LinkedIn no configurado (opcional)"; exit 0; fi
+          python scripts/social.py --linkedin --kind deepdive || echo "linkedin deepdive: omitido"
+          cd site/data
+          git init -q -b data; git add -A
+          git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "LinkedIn deep estado $(date -u +%FT%TZ)" || echo "sin cambios"
           git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
           rm -rf .git
 
