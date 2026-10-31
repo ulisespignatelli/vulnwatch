@@ -197,7 +197,27 @@ def build_image(meta, top, handle):
     return img
 
 
-def build_caption(top, handle, site_url):
+CHAN_TG = os.environ.get("TG_CHANNEL_URL", "").strip() or "t.me/UPSecurityCibernews"
+CHAN_IG = os.environ.get("IG_PROFILE_URL", "").strip() or "instagram.com/upsecuritycybernews"
+CHAN_LI = os.environ.get("LI_PROFILE_URL", "").strip()   # LinkedIn (se completa cuando lo armemos)
+
+
+def _cta(platform, site_url):
+    """Bloque 'seguinos', promocionando las redes distintas a 'platform'."""
+    web = (site_url or "").replace("https://", "").replace("http://", "").rstrip("/")
+    lines = ["", "📲 Seguinos en nuestras redes:"]
+    if platform != "telegram":
+        lines.append(f"💬 Telegram: {CHAN_TG}")
+    if platform != "instagram":
+        lines.append(f"📸 Instagram: {CHAN_IG}")
+    if CHAN_LI and platform != "linkedin":
+        lines.append(f"💼 LinkedIn: {CHAN_LI}")
+    if web:
+        lines.append(f"🌐 Web: {web}")
+    return "\n".join(lines)
+
+
+def build_caption(top, handle, site_url, platform="telegram"):
     L = ["🛡️ Vulnerabilidades para vigilar HOY", ""]
     for r in top:
         t = tag_for(r)
@@ -207,10 +227,11 @@ def build_caption(top, handle, site_url):
     L += ["",
           "Las traigo de VulnWatch, un panel que armé para ver todas las CVEs al instante, marcar las que se están explotando activamente (CISA KEV) y ordenarlas por riesgo real. Gratis y actualizado cada hora.",
           "",
-          f"👉 Panel completo en el link de mi bio.",
-          "",
+          f"👉 Panel completo en el link de mi bio."]
+    L.append(_cta(platform, site_url))
+    L += ["",
           "#ciberseguridad #pentesting #cybersecurity #infosec #hacking #CVE #vulnerabilidades #opensource #programacion #tecnologia"]
-    _ = (handle, site_url)
+    _ = handle
     return "\n".join(L)
 
 
@@ -711,6 +732,7 @@ def build_deepdive_caption(cve, info, site_url):
               f"📌 Contenido educativo y defensivo. Detalle completo → link en la bio.")
     if link:
         cuerpo += f"\n{link}"
+    cuerpo += "\n" + _cta("instagram", site_url)
     cuerpo += ("\n\n#ciberseguridad #infosec #seguridadinformatica #vulnerabilidades "
                "#cve #pentesting #hacking #ethicalhacking #ciberseguridadhoy")
     return cuerpo[:2200]
@@ -828,6 +850,166 @@ def deepdive(phase, base_url="", site_url=""):
 
 
 
+# ───────────────────────── LINKEDIN (perfil personal) ─────────────────────────
+# Publica en tu perfil: imagen (resumen del día) y documento PDF (deep-dive como carrusel).
+# No necesita URLs públicas: sube los bytes directo por la API.
+
+LI_BASE = "https://api.linkedin.com/rest"
+LI_VERSION = os.environ.get("LI_VERSION", "").strip() or "202505"
+_LI_RESERVED = set("\\|{}@[]()<>#*_~")
+
+
+def _li_escape(text):
+    """LinkedIn Posts API reserva ciertos caracteres en 'commentary'; hay que escaparlos."""
+    return "".join("\\" + c if c in _LI_RESERVED else c for c in str(text or ""))
+
+
+def _post_form(url, params):
+    data = urllib.parse.urlencode(params).encode()
+    req = urllib.request.Request(url, data=data)
+    with urllib.request.urlopen(req, timeout=60, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode())
+
+
+def li_token():
+    """Token de acceso: si hay refresh_token + client_secret, lo renueva; si no, usa el access token directo."""
+    rt = os.environ.get("LI_REFRESH_TOKEN", "").strip()
+    cs = os.environ.get("LI_CLIENT_SECRET", "").strip()
+    cid = os.environ.get("LI_CLIENT_ID", "").strip() or "77vk5g927ep5md"
+    if rt and cs:
+        try:
+            out = _post_form("https://www.linkedin.com/oauth/v2/accessToken",
+                             {"grant_type": "refresh_token", "refresh_token": rt,
+                              "client_id": cid, "client_secret": cs})
+            if out.get("access_token"):
+                return out["access_token"]
+        except Exception as e:
+            print(f"linkedin: no se pudo refrescar el token, uso el access token directo ({e})")
+    return os.environ.get("LI_ACCESS_TOKEN", "").strip()
+
+
+def _li_headers(token, extra=None):
+    h = {"Authorization": f"Bearer {token}",
+         "X-Restli-Protocol-Version": "2.0.0",
+         "LinkedIn-Version": LI_VERSION}
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _li_json(url, token, payload):
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=_li_headers(token, {"Content-Type": "application/json"}))
+    try:
+        with urllib.request.urlopen(req, timeout=60, context=ssl.create_default_context()) as r:
+            body = r.read().decode() or ""
+            out = json.loads(body) if body.strip().startswith("{") else {}
+            hid = r.headers.get("x-restli-id") or r.headers.get("x-linkedin-id")
+            if hid and "id" not in out:
+                out["id"] = hid
+            return out
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:400]}") from None
+
+
+def _li_upload(upload_url, token, path):
+    data = open(path, "rb").read()
+    req = urllib.request.Request(upload_url, data=data, method="PUT",
+                                 headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=180, context=ssl.create_default_context()) as r:
+        return r.status in (200, 201)
+
+
+def li_upload_image(token, owner, path):
+    init = _li_json(f"{LI_BASE}/images?action=initializeUpload", token,
+                    {"initializeUploadRequest": {"owner": owner}})
+    v = init.get("value", {})
+    _li_upload(v["uploadUrl"], token, path)
+    return v["image"]
+
+
+def li_upload_document(token, owner, path):
+    init = _li_json(f"{LI_BASE}/documents?action=initializeUpload", token,
+                    {"initializeUploadRequest": {"owner": owner}})
+    v = init.get("value", {})
+    _li_upload(v["uploadUrl"], token, path)
+    return v["document"]
+
+
+def li_create_post(token, owner, commentary, media_urn, title):
+    payload = {
+        "author": owner,
+        "commentary": _li_escape(commentary),
+        "visibility": "PUBLIC",
+        "distribution": {"feedDistribution": "MAIN_FEED", "targetEntities": [], "thirdPartyDistributionChannels": []},
+        "content": {"media": {"title": title[:100], "id": media_urn}},
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False,
+    }
+    return _li_json(f"{LI_BASE}/posts", token, payload).get("id")
+
+
+def linkedin_summary(site_url=""):
+    """Publica el resumen del día (imagen today.jpg) en tu perfil de LinkedIn."""
+    token = li_token()
+    owner = os.environ.get("LI_PERSON_URN", "").strip()
+    if not (token and owner):
+        print("linkedin: falta LI_ACCESS_TOKEN / LI_PERSON_URN")
+        return
+    jpg = OUT / "today.jpg"
+    if not jpg.exists():
+        print("linkedin: no existe today.jpg (¿corrió la generación de la placa?)")
+        return
+    recent = read_json(DATA / "recent.json", [])
+    top = pick_top(recent, 3)
+    sig = _card_signature(top)
+    if _already_posted("li_sum", sig):
+        print("linkedin: resumen sin cambios respecto al último; no se repite")
+        return
+    cap = build_caption(top, "", site_url, platform="linkedin")
+    try:
+        img_urn = li_upload_image(token, owner, str(jpg))
+        pid = li_create_post(token, owner, cap, img_urn, "Vulnerabilidades para vigilar hoy")
+        _mark_posted("li_sum", sig)
+        print(f"linkedin: resumen publicado ({pid})")
+    except Exception as e:
+        print(f"linkedin: fallo al publicar el resumen: {e}")
+
+
+def linkedin_deepdive(site_url=""):
+    """Publica un deep-dive como documento PDF (carrusel nativo) en tu perfil de LinkedIn."""
+    token = li_token()
+    owner = os.environ.get("LI_PERSON_URN", "").strip()
+    if not (token and owner):
+        print("linkedin: falta LI_ACCESS_TOKEN / LI_PERSON_URN")
+        return
+    recent = read_json(DATA / "recent.json", [])
+    if not recent:
+        return
+    posted_f = OUT / "posted_li_deepdives.json"
+    posted = read_json(posted_f, [])
+    chosen = pick_deepdive(recent, posted)
+    if not chosen:
+        print("linkedin: no hay CVE nueva que califique para deep-dive")
+        return
+    info = cwe_info(chosen)
+    imgs = [im.convert("RGB") for im in build_deepdive_slides(chosen, info)]
+    ddir = OUT / "li_deep"
+    ddir.mkdir(parents=True, exist_ok=True)
+    pdf = ddir / "carousel.pdf"
+    imgs[0].save(pdf, "PDF", save_all=True, append_images=imgs[1:])
+    cap = build_deepdive_caption(chosen, info, site_url)
+    try:
+        doc_urn = li_upload_document(token, owner, str(pdf))
+        pid = li_create_post(token, owner, cap, doc_urn, f"{chosen['id']} — {info['nombre']}")
+        posted.append(chosen["id"])
+        posted_f.write_text(json.dumps(posted[-2000:], ensure_ascii=False), encoding="utf-8")
+        print(f"linkedin: deep-dive publicado {chosen['id']} ({pid})")
+    except Exception as e:
+        print(f"linkedin: fallo al publicar el deep-dive: {e}")
+
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--handle", default=os.environ.get("SOCIAL_HANDLE", "@UP_Ciberseguridad"))
@@ -838,11 +1020,21 @@ def main():
     ap.add_argument("--deepdive", action="store_true", help="modo deep-dive educativo (carrusel)")
     ap.add_argument("--phase", default="prepare", help="deep-dive: 'prepare' o 'publish'")
     ap.add_argument("--base-url", default="", help="deep-dive: URL base pública de las placas")
+    ap.add_argument("--linkedin", action="store_true", help="publicar en LinkedIn (perfil personal)")
+    ap.add_argument("--kind", default="summary", help="linkedin: 'summary' o 'deepdive'")
     a = ap.parse_args()
 
     # Modo deep-dive educativo (carrusel de Instagram), independiente de la placa diaria.
     if a.deepdive:
         deepdive(a.phase, base_url=a.base_url, site_url=a.site_url)
+        return 0
+
+    # Modo LinkedIn (perfil personal): resumen (imagen) o deep-dive (PDF carrusel).
+    if a.linkedin:
+        if a.kind == "deepdive":
+            linkedin_deepdive(a.site_url)
+        else:
+            linkedin_summary(a.site_url)
         return 0
 
     meta = read_json(DATA / "meta.json", {})
@@ -858,7 +1050,7 @@ def main():
     img.save(img_path, "PNG")
     jpg_path = OUT / "today.jpg"           # Instagram requiere JPEG
     img.convert("RGB").save(jpg_path, "JPEG", quality=92)
-    caption = build_caption(top, a.handle, a.site_url)
+    caption = build_caption(top, a.handle, a.site_url, platform="instagram" if a.instagram else "telegram")
     (OUT / "today.txt").write_text(caption, encoding="utf-8")
     print(f"social: imagen y texto generados ({', '.join(r.get('id','') for r in top)})")
 
