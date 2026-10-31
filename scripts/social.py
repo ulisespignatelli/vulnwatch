@@ -16,6 +16,7 @@ import json
 import mimetypes
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -292,6 +293,79 @@ def sync_news_telegram(max_per_run=6):
     print(f"news: {sent} noticia(s) nueva(s) publicada(s) en Telegram ({len(nuevas)} pendientes en total)")
 
 
+def _cve_is_important(r):
+    """Señal de alto valor: explotada (KEV), con exploit/PoC, o usada en ransomware.
+    Con CVE_FEED_CRITICAL=1 también incluye las críticas por CVSS (>=9)."""
+    if r.get("kev") or r.get("exploit") in ("active", "poc") or r.get("ransomware"):
+        return True
+    if os.environ.get("CVE_FEED_CRITICAL", "").strip() in ("1", "true", "yes"):
+        return (r.get("score") or 0) >= 9
+    return False
+
+
+def sync_cves_telegram(site_url="", max_per_run=40, pause=1.5):
+    """Publica en Telegram las CVEs nuevas (una vez cada una, sin repetir nunca).
+    Por defecto publica TODAS las CVEs (CVE_FEED_MODE=all). Con CVE_FEED_MODE=important
+    solo las explotadas/PoC/ransomware (y críticas si CVE_FEED_CRITICAL=1).
+    Primera corrida: siembra sin publicar, para no mandar todo el backlog de golpe."""
+    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not (token and chat):
+        return
+    recent = read_json(DATA / "recent.json", [])
+    if not recent:
+        return
+    OUT.mkdir(parents=True, exist_ok=True)
+    state = OUT / "posted_cves.json"
+    mode = os.environ.get("CVE_FEED_MODE", "all").strip().lower()
+    keep = (lambda r: True) if mode != "important" else _cve_is_important
+    try:
+        cap = int(os.environ.get("CVE_FEED_MAX", "").strip() or max_per_run)
+    except ValueError:
+        cap = max_per_run
+    candidatas = [r for r in recent if keep(r)]
+    ids_now = [r["id"] for r in candidatas]
+    if not state.exists():   # primera corrida: sembrar sin publicar
+        state.write_text(json.dumps(ids_now[:12000], ensure_ascii=False), encoding="utf-8")
+        print(f"cves: primera corrida — {len(ids_now)} marcadas como vistas, sin publicar")
+        return
+    posted = read_json(state, [])
+    seen = set(posted)
+    nuevas = [r for r in candidatas if r["id"] not in seen]
+    nuevas.sort(key=lambda r: r.get("published", ""))   # de la más vieja a la más nueva
+    base = (site_url or "").rstrip("/")
+    sent = 0
+    for r in nuevas[:cap]:
+        tags = []
+        if r.get("kev") or r.get("exploit") == "active":
+            tags.append("🔴 EXPLOTADA")
+        if r.get("exploit") == "poc":
+            tags.append("🟠 PoC público")
+        if r.get("ransomware"):
+            tags.append("🟣 Ransomware")
+        sev = (r.get("severity") or "").upper()
+        sev_icon = {"CRITICAL": "🔴 Crítica", "HIGH": "🟠 Alta",
+                    "MEDIUM": "🟡 Media", "LOW": "🟢 Baja"}.get(sev, "⚪ Sin severidad")
+        if not tags:
+            tags.append(sev_icon)
+        tag = " · ".join(tags)
+        score = r.get("score")
+        head = f"🛡️ <b>{_esc_html(r['id'])}</b>" + (f" — CVSS {score}" if score is not None else "")
+        desc = _esc_html((r.get("desc_es") or r.get("desc") or "")[:220])
+        link = f"{base}/#/cve/{r['id']}" if base else ""
+        msg = f"{head}\n{tag}\n\n{desc}" + (f"\n\n🔗 {link}" if link else "")
+        try:
+            send_telegram_message(token, chat, msg, preview=False)
+            posted.append(r["id"]); seen.add(r["id"]); sent += 1
+            if pause and sent < cap:
+                time.sleep(pause)
+        except Exception as e:
+            print(f"cves: fallo al publicar: {e}")
+            break
+    state.write_text(json.dumps(posted[-15000:], ensure_ascii=False), encoding="utf-8")
+    print(f"cves: {sent} CVE(s) nueva(s) publicada(s) en Telegram ({len(nuevas)} pendientes en total)")
+
+
 def send_telegram_photo(token, chat_id, img_path, caption):
     """Publica la imagen con pie en Telegram (multipart/form-data, solo stdlib)."""
     url = f"https://api.telegram.org/bot{token}/sendPhoto"
@@ -317,7 +391,7 @@ def send_telegram_photo(token, chat_id, img_path, caption):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--handle", default=os.environ.get("SOCIAL_HANDLE", "@UP_Ciberseguridad"))
-    ap.add_argument("--site-url", default="")
+    ap.add_argument("--site-url", default=os.environ.get("SITE_URL", "").strip() or "https://ulisespignatelli.github.io/vulnwatch")
     ap.add_argument("--telegram", action="store_true", help="publicar la imagen en Telegram")
     ap.add_argument("--instagram", action="store_true", help="publicar la imagen en Instagram (Graph API)")
     ap.add_argument("--image-url", default="", help="URL pública del JPEG para Instagram")
@@ -352,8 +426,9 @@ def main():
         else:
             print("social: Telegram no configurado (faltan TELEGRAM_TOKEN / TELEGRAM_CHAT_ID)")
 
-    # Noticias nuevas → Telegram. Corre en el paso de la placa (cada hora), no en el de Instagram.
+    # Feeds nuevos → Telegram. Corren en el paso de la placa (cada hora), no en el de Instagram.
     if not a.instagram:
+        sync_cves_telegram(site_url=a.site_url)
         sync_news_telegram()
 
     if a.instagram:
