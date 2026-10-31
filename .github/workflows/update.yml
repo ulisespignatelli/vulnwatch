@@ -2,7 +2,7 @@ name: Actualizar datos y publicar
 
 on:
   schedule:
-    - cron: "17 * * * *"       # cada hora (GitHub puede demorarla unos minutos)
+    - cron: "17 * * * *"
   push:
     branches: [main]
   workflow_dispatch:
@@ -30,7 +30,6 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 340
-    # si algo falla, GitHub te manda un email automáticamente
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -40,6 +39,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Instalar dependencias para la placa de redes
+        run: pip install --quiet pillow
 
       - name: Restaurar datos anteriores (rama 'data')
         run: |
@@ -64,17 +66,43 @@ jobs:
           if [ "${{ inputs.backfill }}" = "true" ]; then ARGS="$ARGS --backfill"; fi
           python scripts/fetch.py $ARGS
 
+      - name: Generar placa y texto para redes (y publicar en Telegram 1 vez al día)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_HANDLE: ${{ vars.SOCIAL_HANDLE }}
+        run: |
+          ARGS="--site-url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          HOUR=$(date -u +%H)
+          SLOT="${{ vars.SOCIAL_HOUR }}"; SLOT="${SLOT:-12}"
+          if [ "$HOUR" = "$SLOT" ]; then ARGS="$ARGS --telegram"; fi
+          python scripts/social.py $ARGS || echo "social: omitido"
+
       - name: Guardar datos en la rama 'data'
+        id: savedata
         run: |
           cd site/data
           git init -q -b data
           git add -A
           git -c user.name="vulnwatch-bot" -c user.email="bot@users.noreply.github.com" commit -qm "Datos $(date -u +%FT%TZ)"
           git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           rm -rf .git
 
+      - name: Publicar en Instagram (1 vez al día)
+        if: success()
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          SOCIAL_HANDLE: ${{ vars.SOCIAL_HANDLE }}
+        run: |
+          HOUR=$(date -u +%H); SLOT="${{ vars.SOCIAL_HOUR }}"; SLOT="${SLOT:-12}"
+          if [ "$HOUR" != "$SLOT" ]; then echo "fuera de la hora de posteo diario"; exit 0; fi
+          if [ -z "$IG_USER_ID" ] || [ -z "$IG_ACCESS_TOKEN" ]; then echo "Instagram no configurado (opcional)"; exit 0; fi
+          URL="https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.savedata.outputs.sha }}/social/today.jpg"
+          python scripts/social.py --instagram --image-url "$URL" || echo "instagram: omitido"
+
       - name: Mantener activa la tarea programada
-        # GitHub desactiva los cron tras 60 días sin actividad; esto la re-habilita sola.
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
