@@ -107,6 +107,13 @@ Optional configuration (*Settings → Secrets and variables → Actions*):
 | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` | secret | Telegram alerts |
 | `WATCHLIST` | variable | Comma-separated keywords for alerts, e.g. `fortinet,exchange,vmware` |
 | `BACKFILL_FROM` | variable | Load history from an earlier date, e.g. `2020-01-01` |
+| `SOCIAL_HANDLE` | variable | Handle shown on the daily social card, e.g. `@UP_Ciberseguridad` |
+| `SOCIAL_HOUR` | variable | UTC hour to auto-post the daily card to Telegram (default `12`) |
+| `IG_USER_ID` | secret | Instagram Business account ID (optional, for auto-posting to Instagram) |
+| `IG_ACCESS_TOKEN` | secret | Long-lived Facebook Page token with `instagram_content_publish` (optional) |
+
+### Daily social card (Telegram + Instagram)
+On each run VulnWatch renders a **ready-to-post image** with the day's top vulnerabilities plus a **caption with hashtags**, saved to the `data` branch at `social/today.png` and `social/today.txt`. If Telegram is configured, the card is **auto-posted once a day** (hour set by `SOCIAL_HOUR`). The image and caption are left ready to post manually. Optionally, with an Instagram **Business/Creator** account and a Meta app (`IG_USER_ID` + `IG_ACCESS_TOKEN` secrets), the card is **auto-published** to Instagram once a day too.
 
 ### Run locally
 

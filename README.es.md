@@ -52,6 +52,25 @@ Por defecto se cargan las CVEs desde 2025. Para traer más años: *Actions → R
 
 Vas a recibir un mensaje cuando haya nuevas vulnerabilidades en KEV, CVEs críticas (CVSS ≥ 9) o coincidencias con tu lista. Si no hay novedades, no te llega nada.
 
+### Placa diaria para redes sociales (Telegram + Instagram)
+Con cada actualización, VulnWatch genera una **imagen lista para redes** con las vulnerabilidades más críticas del día y un **texto (caption) con hashtags**. Quedan guardadas en la rama `data`:
+- Imagen: `https://raw.githubusercontent.com/TU_USUARIO/vulnwatch/data/social/today.png`
+- Texto: `https://raw.githubusercontent.com/TU_USUARIO/vulnwatch/data/social/today.txt`
+
+**Telegram (automático):** si configuraste los secrets de Telegram, una vez al día se publica la placa con su texto en tu canal, sola. La hora se controla con la variable `SOCIAL_HOUR` (UTC; por defecto `12`, que son las 9:00 en Argentina).
+
+**Instagram (manual, en un clic):** la imagen y el texto quedan listos para que los subas vos cuando quieras: abrís los dos enlaces de arriba, descargás la imagen y copiás el texto. Personalizá el usuario que aparece en la placa con la variable `SOCIAL_HANDLE` (por ejemplo `@UP_Ciberseguridad`).
+
+**Instagram (automático, opcional):** se puede publicar solo, pero requiere una cuenta **Business o Creator** (no personal) y una configuración inicial en Meta:
+1. Pasá tu cuenta de Instagram a **Business/Creator** y conectala a una **página de Facebook**.
+2. Creá una app en [Meta for Developers](https://developers.facebook.com/) y agregá el producto *Instagram Graph API*.
+3. Obtené el **ID de tu cuenta de Instagram** y un **token de acceso de página de larga duración** (con los permisos `instagram_basic`, `instagram_content_publish` y `pages_read_engagement`). Un token de página de larga duración no vence bajo condiciones normales.
+4. Cargá los secrets `IG_USER_ID` y `IG_ACCESS_TOKEN` en *Settings → Secrets and variables → Actions*.
+
+Con eso, una vez al día (en la hora `SOCIAL_HOUR`) la placa se publica sola en tu feed de Instagram. Si algún secret falta, el paso se omite sin romper nada.
+
+> ⚠️ Instagram puede cambiar su API o revocar el token (por ejemplo, al cambiar la contraseña de Facebook); si pasa, hay que rehacer el token. Y tené en cuenta que postear una placa igual todos los días puede reducir el alcance en Instagram: es ideal para Telegram, y en Instagram quizá te convenga elegir qué días publicar.
+
 ---
 
 ## Cómo funciona
