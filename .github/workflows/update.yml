@@ -2,7 +2,7 @@ name: Actualizar datos y publicar
 
 on:
   schedule:
-    - cron: "17 * * * *"       # cada hora (GitHub puede demorarla unos minutos)
+    - cron: "17,47 * * * *"    # cada 30 min (GitHub puede demorarla unos minutos)
   push:
     branches: [main]
   workflow_dispatch:
@@ -123,9 +123,12 @@ jobs:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
         run: |
           if [ "${{ inputs.force_deepdive }}" != "true" ]; then
-            HOUR=$(date -u +%H)
+            HOUR=$(date -u +%H); MIN=$((10#$(date -u +%M)))
             HOURS="${{ vars.DEEPDIVE_HOURS }}"; HOURS="${HOURS:-13,18,23}"   # UTC (≈10, 15, 20 ART)
             case ",$HOURS," in *",$HOUR,"*) : ;; *) echo "fuera de las horas de deep-dive"; exit 0 ;; esac
+            # Con el cron de cada 30 min, solo disparamos en la primera corrida de la hora (minuto < 30)
+            # para que el deep-dive siga siendo 3 veces al día y no se duplique.
+            if [ "$MIN" -ge 30 ]; then echo "segunda corrida de la hora; el deep-dive ya salió"; exit 0; fi
           else
             echo "deep-dive forzado manualmente"
           fi
