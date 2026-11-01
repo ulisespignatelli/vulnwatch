@@ -199,7 +199,7 @@ def build_image(meta, top, handle):
 
 
 CHAN_TG = os.environ.get("TG_CHANNEL_URL", "").strip() or "t.me/UPSecurityCibernews"
-CHAN_IG = os.environ.get("IG_PROFILE_URL", "").strip() or "instagram.com/upsecuritycybernews"
+CHAN_IG = os.environ.get("IG_PROFILE_URL", "").strip() or "instagram.com/upseclab"
 CHAN_LI = os.environ.get("LI_PROFILE_URL", "").strip()   # LinkedIn (se completa cuando lo armemos)
 
 
@@ -644,7 +644,7 @@ def _dd_footer(d, W, H, M):
     d.text((W - M - d.textlength(r, font=font(28)), fy + 28), r, font=font(28), fill=TX2)
 
 
-SOCIAL_IG_HANDLE = os.environ.get("IG_HANDLE", "").strip() or "@upsecuritycybernews"
+SOCIAL_IG_HANDLE = os.environ.get("IG_HANDLE", "").strip() or "@upseclab"
 
 
 def build_deepdive_slides(cve, info):
