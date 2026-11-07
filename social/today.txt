@@ -1,0 +1,15 @@
+🛡️ Vulnerabilidades para vigilar HOY
+
+🔴 CVE-2026-76418 (CVSS 8.6) — EXPLOTADA
+🔴 CVE-2026-119977 (CVSS 8.1) — EXPLOTADA
+🔴 CVE-2026-19868 (CVSS 7.5) — EXPLOTADA
+
+Las traigo de VulnWatch, un panel que armé para ver todas las CVEs al instante, marcar las que se están explotando activamente (CISA KEV) y ordenarlas por riesgo real. Gratis y actualizado cada hora.
+
+👉 Panel completo en el link de mi bio.
+
+📲 Seguinos en nuestras redes:
+💬 Telegram: t.me/UPSecurityCibernews
+🌐 Web: ulisespignatelli.github.io/vulnwatch
+
+#ciberseguridad #pentesting #cybersecurity #infosec #hacking #CVE #vulnerabilidades #opensource #programacion #tecnologia
