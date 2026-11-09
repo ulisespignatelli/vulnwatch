@@ -18,11 +18,12 @@ const store = {
 };
 
 const S = {
-  meta: null, recent: [], kev: {items: []}, kevMap: new Map(), news: [],
+  meta: null, recent: [], kev: {items: []}, kevMap: new Map(), news: [], ics: [],
   months: new Map(),            // "YYYY-MM" -> rows
   watch: store.get("watch", []),
+  assets: store.get("assets", []),
   reviewed: new Set(store.get("reviewed", [])),
-  f: Object.assign({q:"", sev:[], kev:false, rw:false, poc:false, watch:false, hideRev:false, epss:0, src:"recent", sort:"published", dir:-1, page:0}, store.get("filters", {})),
+  f: Object.assign({q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, hideRev:false, epss:0, src:"recent", sort:"published", dir:-1, page:0}, store.get("filters", {})),
 };
 S.f.page = 0;
 
@@ -54,6 +55,62 @@ const isWatched = r => {
   const hay = ((r.desc || "") + " " + (r.products || []).join(" ") + " " + r.id).toLowerCase();
   return S.watch.some(w => hay.includes(w));
 };
+
+// ---------- matching por activo (versión exacta vs rangos CPE) ----------
+const normProd = s => String(s || "").trim().toLowerCase().replace(/\s+/g, "_");
+// compara versiones segmento a segmento (numérico cuando se puede)
+function cmpVer(a, b) {
+  const pa = String(a).split(/[.\-_+~]/), pb = String(b).split(/[.\-_+~]/);
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) {
+    const x = pa[i] ?? "0", y = pb[i] ?? "0";
+    if (/^\d+$/.test(x) && /^\d+$/.test(y)) { const d = (+x) - (+y); if (d) return Math.sign(d); }
+    else if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+// ¿la versión cae dentro del rango vulnerable de la entrada CPE?
+function inRange(ver, e) {
+  if (e.v != null) return cmpVer(ver, e.v) === 0;              // versión exacta
+  if (e.si != null && cmpVer(ver, e.si) < 0) return false;    // >= inicio incl
+  if (e.se != null && cmpVer(ver, e.se) <= 0) return false;   // >  inicio excl
+  if (e.ei != null && cmpVer(ver, e.ei) > 0) return false;    // <= fin incl
+  if (e.ee != null && cmpVer(ver, e.ee) >= 0) return false;   // <  fin excl
+  return true;   // sin límites ni versión exacta => todas las versiones vulnerables
+}
+// parsea "proveedor:producto versión" (o "producto versión")
+function parseAsset(line) {
+  const parts = String(line).trim().split(/\s+/);
+  if (!parts[0]) return null;
+  let spec = parts[0], ver = (parts[1] || "").trim(), v = "", p = "";
+  if (spec.includes(":")) { const s = spec.split(":"); v = s[0]; p = s[1]; } else { p = spec; }
+  p = normProd(p); if (!p) return null;
+  return {v: normProd(v), p, ver, label: String(line).trim()};
+}
+// devuelve {a, e} si algún activo coincide con una entrada CPE del CVE, o null
+function assetHit(r) {
+  if (!S.assets.length || !r.cpe || !r.cpe.length) return null;
+  for (const a of S.assets) {
+    for (const e of r.cpe) {
+      const ix = e.p.indexOf(":");
+      const ev = ix >= 0 ? e.p.slice(0, ix) : "", ep = ix >= 0 ? e.p.slice(ix + 1) : e.p;
+      if (ep !== a.p) continue;
+      if (a.v && ev && ev !== a.v) continue;   // proveedor opcional
+      if (!a.ver) return {a, e};               // sin versión => coincide a nivel producto
+      if (inRange(a.ver, e)) return {a, e};
+    }
+  }
+  return null;
+}
+const isAffected = r => !!assetHit(r);
+const isOT = r => !!r.ics;
+function cpeTxt(e) {
+  if (e.v) return esc(e.p + " " + e.v);
+  const b = [];
+  if (e.si) b.push("≥ " + e.si); if (e.se) b.push("> " + e.se);
+  if (e.ei) b.push("≤ " + e.ei); if (e.ee) b.push("< " + e.ee);
+  return esc(e.p) + (b.length ? " (" + esc(b.join(", ")) + ")" : " (todas las versiones)");
+}
 const fmtDate = s => s ? new Date(s.length <= 10 ? s + "T12:00:00Z" : s + (s.endsWith("Z") ? "" : "Z")).toLocaleDateString("es-AR", {day:"2-digit", month:"short", year:"numeric"}) : "–";
 const fmtShort = s => s ? s.slice(8,10) + "/" + s.slice(5,7) + "/" + s.slice(2,4) : "–";
 const fmtDT = s => s ? new Date(s + (s.endsWith("Z") ? "" : "Z")).toLocaleString("es-AR", {day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit"}) : "–";
@@ -73,6 +130,8 @@ function tags(r) {
   if (r.exploit === "poc") t += `<span class="tag poc" title="Existe código de ataque público (PoC) según CISA">PoC PÚBLICO</span>`;
   if (r.origin === "cve.org") t += `<span class="tag new" title="Recién publicada en CVE.org, todavía sin análisis de la NVD">NUEVA</span>`;
   if (r.ransomware) t += `<span class="tag rw" title="Usada en campañas de ransomware">RANSOMWARE</span>`;
+  if (isOT(r)) t += `<span class="tag ot" title="Afecta a sistemas de control industrial (OT/ICS)">OT/ICS</span>`;
+  if (isAffected(r)) t += `<span class="tag aff" title="Afecta a un activo de tu inventario (coincide la versión)">AFECTA A MIS ACTIVOS</span>`;
   if (isWatched(r)) t += `<span class="tag watch">MI LISTA</span>`;
   return t;
 }
@@ -113,6 +172,7 @@ views.hoy = () => {
   const kev7 = S.kev.items.filter(k => new Date(k.added + "T23:59:59Z").getTime() >= week);
   const poc7 = S.recent.filter(r => t(r.published) >= week && (r.exploit || r.kev)).length;
   const watch7 = S.recent.filter(r => t(r.published) >= week && isWatched(r));
+  const aff7 = S.recent.filter(r => t(r.published) >= week && isAffected(r));
   const top = [...S.recent].sort((a, b) => priority(b) - priority(a)).slice(0, 12);
 
   // gráfico 14 días apilado por severidad
@@ -149,6 +209,7 @@ views.hoy = () => {
     <div class="card kpi acc"><div class="lbl">Nuevas · 24 h</div><div class="val">${last24.length}</div><div class="hint">CVEs publicadas</div></div>
     <div class="card kpi red"><div class="lbl">Críticas · 24 h</div><div class="val">${crit24.length}</div><div class="hint">CVSS ≥ 9.0</div></div>
     <div class="card kpi kev"><div class="lbl">Explotadas · 7 días</div><div class="val">${kev7.length}</div><div class="hint">agregadas a CISA KEV</div></div>
+    <div class="card kpi"><div class="lbl">Mis activos · 7 días</div><div class="val">${S.assets.length ? aff7.length : "–"}</div><div class="hint">${S.assets.length ? "afectan a tu inventario" : '<a href="#/activos">cargar activos</a>'}</div></div>
     <div class="card kpi"><div class="lbl">Mi lista · 7 días</div><div class="val">${S.watch.length ? watch7.length : "–"}</div><div class="hint">${S.watch.length ? "coinciden con tus productos" : '<a href="#/config">configurar</a>'}</div></div>
     <div class="card kpi"><div class="lbl">Últimos 14 días</div><div class="val">${S.recent.length.toLocaleString("es-AR")}</div><div class="hint">${poc7} con exploit/PoC en 7 días</div></div>
   </div>
@@ -218,6 +279,8 @@ function filtered() {
     if (f.poc && !(r.kev || r.exploit)) return false;
     if (f.epss && (r.epss || 0) * 100 < f.epss) return false;
     if (f.watch && !isWatched(r)) return false;
+    if (f.aff && !isAffected(r)) return false;
+    if (f.ot && !isOT(r)) return false;
     if (f.hideRev && S.reviewed.has(r.id)) return false;
     if (terms.length) {
       const hay = (r.id + " " + (r.title || "") + " " + r.desc + " " + (r.products || []).join(" ") + " " + (r.cwe || []).join(" ")).toLowerCase();
@@ -255,6 +318,8 @@ views.cves = () => {
     <label class="ck"><input type="checkbox" id="fpoc" ${f.poc ? "checked" : ""}> Con exploit / PoC</label>
     <label class="ck"><input type="checkbox" id="frw" ${f.rw ? "checked" : ""}> Ransomware</label>
     <label class="ck"><input type="checkbox" id="fwatch" ${f.watch ? "checked" : ""}> Mi lista</label>
+    <label class="ck"><input type="checkbox" id="faff" ${f.aff ? "checked" : ""}> Afecta a mis activos</label>
+    <label class="ck"><input type="checkbox" id="fot" ${f.ot ? "checked" : ""}> OT / ICS</label>
     <label class="ck"><input type="checkbox" id="frev" ${f.hideRev ? "checked" : ""}> Ocultar revisadas</label>
     <label class="ck">EPSS ≥ <input type="number" id="fepss" min="0" max="100" step="1" value="${f.epss}" style="width:64px">%</label>
     <button class="btn" id="fclear">Limpiar</button>
@@ -296,9 +361,9 @@ function bindCves() {
     f.src = "loaded"; f.page = 0; save();
   });
   $("#fsev").addEventListener("click", e => { const s = e.target.dataset.s; if (!s) return; f.sev = f.sev.includes(s) ? f.sev.filter(x => x !== s) : [...f.sev, s]; f.page = 0; save(); });
-  for (const [id, k] of [["#fkev", "kev"], ["#fpoc", "poc"], ["#frw", "rw"], ["#fwatch", "watch"], ["#frev", "hideRev"]]) $(id).addEventListener("change", e => { f[k] = e.target.checked; f.page = 0; save(); });
+  for (const [id, k] of [["#fkev", "kev"], ["#fpoc", "poc"], ["#frw", "rw"], ["#fwatch", "watch"], ["#faff", "aff"], ["#fot", "ot"], ["#frev", "hideRev"]]) $(id).addEventListener("change", e => { f[k] = e.target.checked; f.page = 0; save(); });
   $("#fepss").addEventListener("change", e => { f.epss = +e.target.value || 0; f.page = 0; save(); });
-  $("#fclear").addEventListener("click", () => { Object.assign(f, {q:"", sev:[], kev:false, rw:false, poc:false, watch:false, hideRev:false, epss:0, page:0}); save(); });
+  $("#fclear").addEventListener("click", () => { Object.assign(f, {q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, hideRev:false, epss:0, page:0}); save(); });
   $("#fcsv").addEventListener("click", () => exportCSV(filtered()));
   document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
     const k = th.dataset.sort; if (f.sort === k) f.dir *= -1; else { f.sort = k; f.dir = k === "id" ? 1 : -1; } f.page = 0; save();
@@ -373,6 +438,99 @@ function bindNews() {
   $("#nq").addEventListener("input", e => { clearTimeout(t); t = setTimeout(() => { newsQ = e.target.value; render(); const el = $("#nq"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }, 200); });
   $("#nsrc").addEventListener("change", e => { newsSrc = e.target.value; render(); });
   $("#ncve").addEventListener("change", e => { newsCVE = e.target.checked; render(); });
+}
+
+// ---------- OT / ICS (seguridad industrial) ----------
+views.ot = () => {
+  const week = Date.now() - 7 * 864e5, t = s => +new Date(s + "Z");
+  const otRecent = S.recent.filter(isOT);
+  const ot7 = otRecent.filter(r => t(r.published) >= week);
+  const otKev = otRecent.filter(r => r.kev || r.exploit === "active");
+  const top = [...otRecent].sort((a, b) => priority(b) - priority(a)).slice(0, 40);
+  const adv = (S.ics || []).slice(0, 12);
+  return `
+  <h1>Seguridad OT / ICS 🏭</h1>
+  <p class="sub">Vulnerabilidades en sistemas de control industrial (SCADA, PLCs, RTUs) y los avisos de <b>CISA ICS-CERT</b>. Un CVE se marca <span class="tag ot">OT/ICS</span> si afecta a un proveedor industrial (Siemens, Schneider, Rockwell, Hitachi Energy…) o lo referencia un aviso ICS.</p>
+  <div class="grid kpis">
+    <div class="card kpi ot"><div class="lbl">OT · últimos 14 días</div><div class="val">${otRecent.length}</div><div class="hint">${ot7.length} en 7 días</div></div>
+    <div class="card kpi kev"><div class="lbl">OT explotadas</div><div class="val">${otKev.length}</div><div class="hint">KEV o explotación activa</div></div>
+    <div class="card kpi"><div class="lbl">Avisos CISA ICS</div><div class="val">${(S.ics || []).length}</div><div class="hint">en el feed</div></div>
+  </div>
+  <div class="grid cols">
+    <div>
+      <h2>CVEs industriales por prioridad</h2>
+      ${top.length ? `<div class="list">${top.map(rowHTML).join("")}</div>
+        <p class="note"><a href="#/cves" id="otall">Ver todas las OT en el explorador →</a></p>`
+        : '<p class="note">No hay CVEs OT en los datos recientes. Probá el explorador con el filtro «OT / ICS» y «Cargar historial completo».</p>'}
+    </div>
+    <div>
+      <h2>Últimos avisos de CISA ICS-CERT</h2>
+      ${adv.length ? adv.map(a => `<a class="news" href="${safeUrl(a.link)}" target="_blank" rel="noopener">
+          <div class="t">${esc(a.title)}</div>
+          <div class="s">${esc(a.source)} · hace ${ago(a.date)}</div>
+          ${a.cves?.length ? `<div class="chips">${a.cves.slice(0, 6).map(c => `<span class="chip-cve" data-cve="${esc(c)}">${esc(c)}</span>`).join("")}</div>` : ""}
+        </a>`).join("")
+        : '<p class="note">Todavía no hay avisos ICS. Se cargan en la próxima actualización de datos.</p>'}
+    </div>
+  </div>`;
+};
+
+function bindOT() {
+  $("#otall")?.addEventListener("click", () => { S.f.ot = true; S.f.src = "loaded"; store.set("filters", S.f); });
+}
+
+// ---------- mis activos (matching por versión) ----------
+function affRowHTML(r, h) {
+  const [pc, pl] = prioLabel(r);
+  return `<div class="row" data-cve="${esc(r.id)}">
+    <div><span class="prio ${pc}">${pl}</span></div>
+    <div><div class="meta"><span class="cveid">${esc(r.id)}</span>${sevBadge(r)}${r.epss != null ? `<span class="tag" title="Probabilidad de explotación (EPSS)">EPSS ${epssTxt(r)}</span>` : ""}${tags(r)}</div>
+    <div class="d">${esc(r.desc)}</div>
+    <div class="note">Coincide <b>${esc(h.a.label)}</b> → ${cpeTxt(h.e)}</div></div>
+    <div class="r">hace ${ago(r.published)}</div></div>`;
+}
+views.activos = () => {
+  const assetsTxt = S.assets.map(a => a.label).join("\n");
+  const pool = [...new Map([...S.recent, ...allLoaded().values()].map(r => [r.id, r])).values()];
+  const hits = S.assets.length
+    ? pool.map(r => ({r, h: assetHit(r)})).filter(x => x.h).sort((a, b) => priority(b.r) - priority(a.r))
+    : [];
+  return `
+  <h1>Mis activos</h1>
+  <p class="sub">Cargá tu stack con <b>versión</b> y VulnWatch cruza cada CVE contra los <b>rangos de versiones vulnerables (CPE) de la NVD</b> — no por texto. Responde la pregunta que importa: <i>¿esto afecta a mis equipos?</i> Todo se guarda sólo en este navegador.</p>
+  <div class="card cfg" style="max-width:820px">
+    <h2>Inventario</h2>
+    <p class="note">Un activo por línea: <span class="mono">producto versión</span>. El producto puede ir como <span class="mono">proveedor:producto</span> (como en los CPE). Ejemplos:</p>
+    <p class="note mono">apache:http_server 2.4.49<br>fortinet:fortios 7.2.0<br>openssl 3.0.1<br>microsoft:windows_server_2019</p>
+    <textarea id="as" style="min-height:130px" placeholder="apache:http_server 2.4.49">${esc(assetsTxt)}</textarea>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn pri" id="assave">Guardar</button>
+      <button class="btn" id="asall" title="Descarga todos los meses para cruzar contra todo el historial">Analizar todo el historial</button>
+      <span id="asok" class="note" style="align-self:center"></span>
+    </div>
+    <p class="note" style="margin-top:12px">Tip: si no ponés versión, se marca cualquier CVE que afecte a ese producto. La probabilidad de explotación (EPSS) y el estado KEV te dicen cuáles parchear primero.</p>
+  </div>
+  <h2 style="margin-top:28px">CVEs que afectan a tus activos <span class="note">(${hits.length})</span></h2>
+  ${!S.assets.length
+      ? '<p class="note">Agregá al menos un activo arriba para empezar.</p>'
+      : !hits.length
+        ? '<p class="note">Sin coincidencias en los datos cargados. Probá <b>«Analizar todo el historial»</b> para cruzar contra todas las CVEs.</p>'
+        : `<div class="list">${hits.slice(0, 300).map(x => affRowHTML(x.r, x.h)).join("")}</div>`}
+  `;
+};
+function bindActivos() {
+  $("#assave").addEventListener("click", () => {
+    S.assets = $("#as").value.split("\n").map(parseAsset).filter(Boolean);
+    store.set("assets", S.assets);
+    $("#asok").textContent = `Guardado (${S.assets.length} activo(s))`;
+    render(true);
+  });
+  $("#asall").addEventListener("click", async e => {
+    const ms = (S.meta?.months || []).map(m => m.month), b = e.target;
+    b.disabled = true;
+    for (let i = 0; i < ms.length; i++) { b.textContent = `Cargando ${i + 1}/${ms.length}…`; await loadMonth(ms[i]); }
+    b.disabled = false; b.textContent = "Analizar todo el historial"; render(true);
+  });
 }
 
 // ---------- configuración / mi lista ----------
@@ -471,7 +629,7 @@ function render(keepScroll) {
   $("#app").innerHTML = views[view]();
   $("#app").dataset.v = view;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.r === view));
-  ({cves: bindCves, kev: bindKev, noticias: bindNews, config: bindConfig})[view]?.();
+  ({cves: bindCves, kev: bindKev, noticias: bindNews, config: bindConfig, activos: bindActivos, ot: bindOT})[view]?.();
   if (keepScroll) window.scrollTo(0, y);
 }
 
@@ -506,11 +664,12 @@ window.addEventListener("hashchange", () => {
 // ---------- inicio ----------
 (async () => {
   try {
-    const [meta, recent, kev, news] = await Promise.all([
+    const [meta, recent, kev, news, ics] = await Promise.all([
       getJSON("data/meta.json"), getJSON("data/recent.json"),
       getJSON("data/kev.json").catch(() => ({items: []})), getJSON("data/news.json").catch(() => []),
+      getJSON("data/ics.json").catch(() => []),
     ]);
-    Object.assign(S, {meta, recent, kev, news});
+    Object.assign(S, {meta, recent, kev, news, ics});
     S.kevMap = new Map(kev.items.map(k => [k.id, k]));
     $("#updated").textContent = "Actualizado " + fmtDT(meta.updated);
     if (/^\d{4}-\d{2}$/.test(S.f.src)) await loadMonth(S.f.src).catch(() => { S.f.src = "recent"; });

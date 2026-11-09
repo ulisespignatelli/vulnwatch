@@ -16,7 +16,10 @@ F.time.sleep = lambda s: None
 kev = json.loads(real_get(C.KEV_URLS[1]))["vulnerabilities"]
 VENDORS = [("microsoft", "windows_11"), ("fortinet", "fortios"), ("apache", "http_server"), ("cisco", "ios_xe"),
            ("wordpress", "wordpress"), ("vmware", "esxi"), ("google", "chrome"), ("linux", "linux_kernel"),
-           ("ivanti", "connect_secure"), ("oracle", "mysql"), ("paloaltonetworks", "pan-os"), ("atlassian", "confluence")]
+           ("ivanti", "connect_secure"), ("oracle", "mysql"), ("paloaltonetworks", "pan-os"), ("atlassian", "confluence"),
+           # proveedores industriales (OT/ICS) para probar la edición OT
+           ("siemens", "simatic_s7_1500"), ("schneider_electric", "ecostruxure_control_expert"),
+           ("rockwellautomation", "factorytalk_view"), ("hitachienergy", "rtu500")]
 KINDS = ["a SQL injection vulnerability", "a cross-site scripting (XSS) vulnerability", "an out-of-bounds write",
          "a remote code execution vulnerability", "a use-after-free", "an authentication bypass",
          "a path traversal vulnerability", "a heap-based buffer overflow", "a server-side request forgery (SSRF)"]
@@ -43,7 +46,9 @@ def make(i, cid=None, vendor=None):
             "cvssData": {"version": "3.1", "baseScore": score, "baseSeverity": sev(score),
                          "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]},
         "weaknesses": [{"description": [{"lang": "en", "value": CWES[k]}]}],
-        "configurations": [{"nodes": [{"cpeMatch": [{"vulnerable": True, "criteria": f"cpe:2.3:a:{v}:{p}:*:*:*:*:*:*:*:*"}]}]}],
+        "configurations": [{"nodes": [{"cpeMatch": [{"vulnerable": True, "criteria": f"cpe:2.3:a:{v}:{p}:*:*:*:*:*:*:*:*",
+            **({"versionStartIncluding": f"{(_mj:=random.randint(1,9))}.{(_mn:=random.randint(0,9))}.0",
+                "versionEndExcluding": f"{_mj}.{_mn}.{random.randint(2,40)}"} if random.random() < .5 else {})}]}]}],
         "references": [{"url": f"https://example.com/advisory/{i}", "tags": ["Vendor Advisory"]}],
     }}
     return item
@@ -83,6 +88,14 @@ def fake_rss(src):
     return f"<?xml version='1.0'?><rss><channel><title>{src}</title>{items}</channel></rss>".encode()
 
 
+def fake_ics(src):
+    ind = [x for x in ITEMS if x["cve"]["id"].endswith(tuple("0123"))][:8]
+    items = "".join(f"""<item><title>{random.choice(['Siemens SIMATIC S7-1500','Schneider Electric EcoStruxure','Rockwell Automation FactoryTalk','Hitachi Energy RTU500'])} — {x['cve']['id']}</title>
+      <link>https://www.cisa.gov/news-events/ics-advisories/icsa-26-{i:03d}-01</link><pubDate>{(NOW - timedelta(hours=i * 9)).strftime('%a, %d %b %Y %H:%M:%S +0000')}</pubDate>
+      <description><![CDATA[CISA released an ICS advisory for {x['cve']['id']} affecting industrial control systems.]]></description></item>""" for i, x in enumerate(ind))
+    return f"<?xml version='1.0'?><rss><channel><title>{src}</title>{items}</channel></rss>".encode()
+
+
 def mock_get(url, params=None, headers=None, retries=5, timeout=60):
     if url.startswith(C.NVD_API):
         return fake_nvd(urllib.parse.urlencode(params))
@@ -90,6 +103,9 @@ def mock_get(url, params=None, headers=None, retries=5, timeout=60):
         return fake_epss()
     if "cisa.gov/sites" in url:
         return real_get(C.KEV_URLS[1])
+    for name, u in C.ICS_FEEDS:
+        if u == url:
+            return fake_ics(name)
     for name, u in C.NEWS_FEEDS:
         if u == url:
             if name == "Dark Reading":

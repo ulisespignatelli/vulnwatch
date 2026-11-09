@@ -50,6 +50,34 @@ NEWS_MAX = 600            # cuántas noticias se guardan
 NEWS_MAX_PER_SOURCE = 60  # máximo por fuente (algunos feeds publican cientos)
 NEWS_MAX_AGE_DAYS = 60
 
+# --- OT / ICS (avisos de CISA ICS-CERT) ---------------------------------
+# Avisos de seguridad de sistemas de control industrial (Siemens, Schneider,
+# Rockwell, etc.), la base de la edición OT de VulnWatch.
+ICS_FEEDS = [
+    ("CISA ICS", "https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml"),
+    ("CISA ICS Medical", "https://www.cisa.gov/cybersecurity-advisories/ics-medical-advisories.xml"),
+]
+ICS_MAX = 400
+ICS_MAX_AGE_DAYS = 120
+# Proveedores industriales (token de proveedor del CPE, normalizado). Un CVE que
+# afecta a alguno de estos se marca como OT/ICS. Ampliable libremente.
+ICS_VENDORS = {
+    "siemens", "schneider_electric", "schneider-electric", "rockwellautomation",
+    "rockwell_automation", "rockwell", "abb", "hitachienergy", "hitachi_energy",
+    "honeywell", "emerson", "mitsubishielectric", "mitsubishi_electric", "omron",
+    "ge", "general_electric", "ge_digital", "yokogawa", "schweitzer_engineering_laboratories",
+    "schweitzer", "sel", "eaton", "moxa", "advantech", "wago", "phoenixcontact",
+    "phoenix_contact", "beckhoff", "codesys", "3s-smart_software_solutions",
+    "delta_electronics", "deltaww", "fanuc", "yaskawa", "danfoss", "johnson_controls",
+    "johnsoncontrols", "osisoft", "aveva", "iconics", "inductive_automation",
+    "unitronics", "automationdirect", "red_lion_controls", "redlion", "opto_22",
+    "bosch_rexroth", "festo", "pilz", "sick", "pepperl-fuchs", "endress+hauser",
+    "kepware", "prosoft_technology", "hms_networks", "ewon", "triangle_microworks",
+    "lsis", "ls_electric", "fuji_electric", "fujielectric", "toshiba", "vipa",
+    "weintek", "inhand_networks", "teltonika", "nozomi_networks", "claroty",
+    "ovarro", "elspec", "subnet_solutions", "ininet_solutions", "contec", "panasonic",
+}
+
 # --- Alertas Telegram (opcionales) --------------------------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()

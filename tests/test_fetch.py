@@ -169,5 +169,49 @@ class TestStore(unittest.TestCase):
         self.assertEqual(s2.get("CVE-X")["desc"], "b")
 
 
+class TestCPE(unittest.TestCase):
+    def test_nvd_cpe_ranges(self):
+        cve = {"configurations": [{"nodes": [{"cpeMatch": [
+            {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:*:*:*:*:*:*:*:*",
+             "versionStartIncluding": "2.4.0", "versionEndExcluding": "2.4.59"},
+            {"vulnerable": True, "criteria": "cpe:2.3:a:openssl:openssl:3.0.1:*:*:*:*:*:*:*"},
+            {"vulnerable": False, "criteria": "cpe:2.3:o:linux:linux_kernel:*:*:*:*:*:*:*:*"},
+        ]}]}]}
+        out = F.extract_cpes(cve)
+        self.assertIn({"p": "apache:http_server", "si": "2.4.0", "ee": "2.4.59"}, out)
+        self.assertIn({"p": "openssl:openssl", "v": "3.0.1"}, out)        # versión exacta
+        self.assertFalse(any(e["p"].startswith("linux") for e in out))    # ignora no vulnerables
+
+    def test_cveorg_affected_ranges(self):
+        cna = {"affected": [{"vendor": "Fortinet", "product": "FortiOS", "versions": [
+            {"version": "7.2.0", "lessThan": "7.2.5", "status": "affected"},
+            {"version": "7.0.0", "lessThanOrEqual": "7.0.12", "status": "affected"},
+            {"version": "6.4.9", "status": "affected"},
+            {"version": "5.0.0", "status": "unaffected"},
+        ]}]}
+        out = F.cpes_from_affected(cna)
+        self.assertIn({"p": "fortinet:fortios", "ee": "7.2.5", "si": "7.2.0"}, out)
+        self.assertIn({"p": "fortinet:fortios", "ei": "7.0.12", "si": "7.0.0"}, out)
+        self.assertIn({"p": "fortinet:fortios", "v": "6.4.9"}, out)
+        self.assertEqual(len(out), 3)                                     # ignora 'unaffected'
+
+    def test_nvd_record_has_cpe(self):
+        r = F.parse_nvd(nvd_item())
+        self.assertIn("cpe", r)
+        self.assertEqual(r["cpe"], [{"p": "fortinet:fortios"}])           # sin rango => producto entero
+
+
+class TestOT(unittest.TestCase):
+    def test_flags_industrial_vendor(self):
+        self.assertEqual(F._is_ot({"cpe": [{"p": "siemens:simatic_s7"}]}), 1)
+        self.assertEqual(F._is_ot({"products": ["schneider electric:ecostruxure"]}), 1)  # NVD usa espacios
+        self.assertEqual(F._is_ot({"cpe": [{"p": "rockwellautomation:factorytalk"}]}), 1)
+
+    def test_ignores_non_industrial(self):
+        self.assertEqual(F._is_ot({"cpe": [{"p": "microsoft:windows_11"}]}), 0)
+        self.assertEqual(F._is_ot({"products": ["apache:http server"]}), 0)
+        self.assertEqual(F._is_ot({}), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

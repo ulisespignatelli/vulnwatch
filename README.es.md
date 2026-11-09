@@ -12,7 +12,9 @@ Panel web para ver **todas las vulnerabilidades (CVE)** del día, cuáles se est
 | **Vulnerabilidades** | Todas las CVEs con buscador, filtros (severidad, KEV, ransomware, EPSS, mi lista, revisadas), orden por columnas, navegación por mes, exportación CSV |
 | **Explotadas (KEV)** | Catálogo completo de CISA con plazos de remediación y uso en ransomware |
 | **Noticias** | 12 fuentes RSS (en inglés y en español); los CVEs que mencionan se abren con un clic |
-| **Mi lista** | Tus productos/proveedores: se resaltan en todo el sitio. Marcar CVEs como "revisadas" |
+| **OT / ICS** | Vista dedicada a seguridad industrial: sigue los **avisos de CISA ICS-CERT** y marca con la etiqueta `OT/ICS` cada CVE que afecta a un proveedor industrial (Siemens, Schneider, Rockwell, Hitachi Energy, ABB…). Pensada para infraestructura crítica y distribuidoras |
+| **Mis activos** | Cargá tu stack con **versión** (ej. `apache:http_server 2.4.49`) y cruza cada CVE contra los **rangos de versiones vulnerables (CPE) de la NVD** — no por texto. Te dice exactamente qué te afecta. La lista queda sólo en tu navegador |
+| **Mi lista** | Tus productos/proveedores por palabra clave: se resaltan en todo el sitio. Marcar CVEs como "revisadas" |
 | **Detalle de CVE** | CVSS, EPSS, info KEV, productos, CWE, referencias, noticias relacionadas, búsqueda de PoC |
 
 **Prioridad** = CVSS + probabilidad de explotación (EPSS) + explotación confirmada (KEV) + ransomware. Así lo urgente queda arriba y no solo lo que tiene un CVSS alto.

@@ -101,7 +101,7 @@ def parse_dt(s: str) -> datetime:
 # Almacén mensual de CVEs  (site/data/cves/YYYY-MM.json)
 # ---------------------------------------------------------------------------
 SCORE_FIELDS = ("score", "severity", "cvss_version", "vector", "cvss_source")
-KEEP_FIELDS = ("kev", "kev_added", "ransomware", "epss", "epss_pct", "exploit", "title")
+KEEP_FIELDS = ("kev", "kev_added", "ransomware", "ics", "epss", "epss_pct", "exploit", "title")
 
 
 class MonthStore:
@@ -140,7 +140,7 @@ class MonthStore:
             if rec.get("score") is None and old.get("score") is not None:
                 for k in SCORE_FIELDS:
                     rec[k] = old.get(k)
-            for k in ("products", "cwe", "refs", "desc"):
+            for k in ("products", "cpe", "cwe", "refs", "desc"):
                 if not rec.get(k) and old.get(k):
                     rec[k] = old[k]
             self._drop(rec["id"])
@@ -209,6 +209,79 @@ def extract_products(cve: dict) -> list[str]:
     return out[:12]
 
 
+def _norm(s: str) -> str:
+    """Normaliza proveedor/producto: minúsculas y espacios -> guión bajo,
+    para que coincidan las claves de NVD (apache:http_server) y de CVE.org."""
+    return (s or "").strip().lower().replace(" ", "_")
+
+
+def extract_cpes(cve: dict) -> list[dict]:
+    """Rangos de versiones vulnerables (CPE) de la NVD, en forma compacta.
+    Cada entrada: {p:"proveedor:producto", v?:versión_exacta,
+    si/se:inicio incl/excl, ei/ee:fin incl/excl}. Habilita el matching por activo."""
+    out, seen = [], set()
+    for conf in cve.get("configurations", []) or []:
+        for node in conf.get("nodes", []) or []:
+            for m in node.get("cpeMatch", []) or []:
+                if not m.get("vulnerable", True):
+                    continue
+                parts = m.get("criteria", "").split(":")
+                if len(parts) <= 5:
+                    continue
+                e = {"p": f"{parts[3]}:{parts[4]}"}
+                if parts[5] not in ("*", "-", ""):
+                    e["v"] = parts[5]
+                for k, src in (("si", "versionStartIncluding"), ("se", "versionStartExcluding"),
+                               ("ei", "versionEndIncluding"), ("ee", "versionEndExcluding")):
+                    val = m.get(src)
+                    if val:
+                        e[k] = val
+                key = tuple(sorted(e.items()))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(e)
+                if len(out) >= 40:
+                    return out
+    return out
+
+
+def cpes_from_affected(cna: dict) -> list[dict]:
+    """Rangos de versiones del bloque 'affected' de CVE.org (best-effort).
+    Permite matchear por versión apenas se publica el CVE, antes del análisis de NVD."""
+    out, seen = [], set()
+    for a in cna.get("affected", []) or []:
+        vendor, product = _norm(a.get("vendor")), _norm(a.get("product"))
+        if not product or product == "n/a":
+            continue
+        pkey = f"{vendor}:{product}" if vendor and vendor != "n/a" else product
+        for ver in a.get("versions", []) or []:
+            if ver.get("status") != "affected":
+                continue
+            e = {"p": pkey}
+            lt, lte = ver.get("lessThan"), ver.get("lessThanOrEqual")
+            base = ver.get("version")
+            base_ok = base and base not in ("0", "*", "-", "", "unspecified")
+            if lt and lt != "*":
+                e["ee"] = lt
+                if base_ok:
+                    e["si"] = base
+            elif lte and lte != "*":
+                e["ei"] = lte
+                if base_ok:
+                    e["si"] = base
+            elif base_ok:
+                e["v"] = base
+            else:
+                continue
+            key = tuple(sorted(e.items()))
+            if key not in seen:
+                seen.add(key)
+                out.append(e)
+            if len(out) >= 40:
+                return out
+    return out
+
+
 def parse_nvd(item: dict) -> dict:
     cve = item["cve"]
     desc = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), "")
@@ -234,6 +307,7 @@ def parse_nvd(item: dict) -> dict:
         **pick_cvss(cve.get("metrics", {}) or {}),
         "cwe": cwes[:4],
         "products": extract_products(cve),
+        "cpe": extract_cpes(cve),
         "refs": refs[:10],
         "origin": "nvd",
     }
@@ -367,6 +441,7 @@ def parse_cve5(r: dict) -> dict | None:
         **(cvss or {"score": None, "severity": "NONE", "cvss_version": "", "vector": "", "cvss_source": ""}),
         "cwe": cwes[:4],
         "products": products[:12],
+        "cpe": cpes_from_affected(cna),
         "refs": refs[:10],
         "origin": "cve.org",
     }
@@ -515,8 +590,19 @@ def sync_epss() -> dict[str, tuple[float, float]]:
     return {}
 
 
-def enrich(store: MonthStore, kev: dict, epss: dict):
+def _is_ot(rec: dict) -> int:
+    """1 si el CVE afecta a un proveedor industrial (OT/ICS), según su CPE/productos."""
+    vendors = set()
+    for e in rec.get("cpe", []):
+        vendors.add(e.get("p", "").split(":")[0])
+    for pr in rec.get("products", []):
+        vendors.add(pr.split(":")[0])
+    return 1 if {_norm(v) for v in vendors} & C.ICS_VENDORS else 0
+
+
+def enrich(store: MonthStore, kev: dict, epss: dict, ics_cves: set | None = None):
     store.load_all()
+    ics_cves = ics_cves or set()
     for key, month in store.cache.items():
         changed = False
         for rec in month.values():
@@ -525,6 +611,7 @@ def enrich(store: MonthStore, kev: dict, epss: dict):
                 "kev": 1 if k else 0,
                 "kev_added": k["added"] if k else "",
                 "ransomware": 1 if k and k["ransomware"] == "Known" else 0,
+                "ics": 1 if (_is_ot(rec) or rec["id"] in ics_cves) else 0,
             }
             if epss:
                 e = epss.get(rec["id"])
@@ -630,6 +717,32 @@ def sync_news() -> list[dict]:
     write_json(C.DATA / "news.json", news)
     log(f"Noticias: {len(news)} guardadas ({ok}/{len(C.NEWS_FEEDS)} fuentes OK)")
     return news
+
+
+def sync_ics() -> set:
+    """Descarga los avisos de CISA ICS-CERT, los guarda en ics.json y devuelve el
+    conjunto de CVE-IDs que mencionan (para reforzar el marcado OT)."""
+    old = read_json(C.DATA / "ics.json", [])
+    by_link = {a["link"]: a for a in old}
+    ok = 0
+    for source, url in C.ICS_FEEDS:
+        try:
+            got = parse_feed(source, http_get(url, retries=2, timeout=30))
+            for a in got:
+                by_link.setdefault(a["link"], a)
+            ok += 1
+            log(f"ICS: {source}: {len(got)}")
+        except Exception as e:
+            log(f"ICS: fallo {source}: {e}")
+    cutoff = iso(NOW - timedelta(days=C.ICS_MAX_AGE_DAYS))
+    adv = sorted((a for a in by_link.values() if a["date"] >= cutoff),
+                 key=lambda a: a["date"], reverse=True)[:C.ICS_MAX]
+    write_json(C.DATA / "ics.json", adv)
+    log(f"ICS: {len(adv)} avisos guardados ({ok}/{len(C.ICS_FEEDS)} fuentes OK)")
+    cve_ids = set()
+    for a in adv:
+        cve_ids.update(a.get("cves", []))
+    return cve_ids
 
 
 # ---------------------------------------------------------------------------
@@ -756,7 +869,14 @@ def main():
 
     kev, kev_new = sync_kev()
     epss = sync_epss()
-    enrich(store, kev, epss)
+    ics_cves = set()
+    if not a.skip_news:
+        try:
+            ics_cves = sync_ics()
+        except Exception as e:
+            errors.append(f"ICS: {e}")
+            log(f"ICS: ERROR {e}")
+    enrich(store, kev, epss, ics_cves)
     store.save()
 
     if not a.skip_news:
