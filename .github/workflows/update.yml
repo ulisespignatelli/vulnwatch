@@ -217,3 +217,8 @@ jobs:
           path: site
       - id: deploy
         uses: actions/deploy-pages@v4
+        with:
+          # El dataset es grande (140k+ CVEs); la sincronización de Pages puede
+          # superar los 10 min por defecto. Le damos hasta 30 min y más reintentos.
+          timeout: 1800000
+          error_count: 20
