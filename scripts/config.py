@@ -78,6 +78,15 @@ ICS_VENDORS = {
     "ovarro", "elspec", "subnet_solutions", "ininet_solutions", "contec", "panasonic",
 }
 
+# --- Exploits públicos (¿hay un exploit listo para usar?) ----------------
+# Metasploit y Nuclei son índices machine-readable en GitHub (reachable desde Actions).
+EXPLOIT_MSF = "https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json"
+EXPLOIT_NUCLEI = "https://raw.githubusercontent.com/projectdiscovery/nuclei-templates/main/cves.json"
+
+# --- API / feed público -------------------------------------------------
+# Cuántas CVEs prioritarias se exponen en los endpoints JSON/RSS.
+API_FEED_MAX = 100
+
 # --- Alertas Telegram (opcionales) --------------------------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()

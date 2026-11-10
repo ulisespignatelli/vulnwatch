@@ -96,11 +96,30 @@ def fake_ics(src):
     return f"<?xml version='1.0'?><rss><channel><title>{src}</title>{items}</channel></rss>".encode()
 
 
+def fake_msf(_url):
+    mods = {}
+    for i, x in enumerate(ITEMS[:600]):
+        if i % 3 == 0:
+            mods[f"exploit/multi/http/mod_{i}"] = {"fullname": f"exploit/multi/http/mod_{i}",
+                                                   "references": [x["cve"]["id"]]}
+    return json.dumps(mods).encode()
+
+
+def fake_nuclei(_url):
+    lines = [json.dumps({"ID": x["cve"]["id"], "file_path": f"http/cves/2026/{x['cve']['id']}.yaml"})
+             for i, x in enumerate(ITEMS[200:700]) if i % 4 == 0]
+    return "\n".join(lines).encode()
+
+
 def mock_get(url, params=None, headers=None, retries=5, timeout=60):
     if url.startswith(C.NVD_API):
         return fake_nvd(urllib.parse.urlencode(params))
     if "epss" in url:
         return fake_epss()
+    if url == C.EXPLOIT_MSF:
+        return fake_msf(url)
+    if url == C.EXPLOIT_NUCLEI:
+        return fake_nuclei(url)
     if "cisa.gov/sites" in url:
         return real_get(C.KEV_URLS[1])
     for name, u in C.ICS_FEEDS:

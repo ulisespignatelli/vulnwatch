@@ -1,4 +1,5 @@
 site/data/
+site/api/
 __pycache__/
 *.pyc
 .DS_Store

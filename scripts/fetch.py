@@ -101,7 +101,7 @@ def parse_dt(s: str) -> datetime:
 # Almacén mensual de CVEs  (site/data/cves/YYYY-MM.json)
 # ---------------------------------------------------------------------------
 SCORE_FIELDS = ("score", "severity", "cvss_version", "vector", "cvss_source")
-KEEP_FIELDS = ("kev", "kev_added", "ransomware", "ics", "epss", "epss_pct", "exploit", "title")
+KEEP_FIELDS = ("kev", "kev_added", "ransomware", "ics", "exp", "epss", "epss_pct", "exploit", "title")
 
 
 class MonthStore:
@@ -600,9 +600,11 @@ def _is_ot(rec: dict) -> int:
     return 1 if {_norm(v) for v in vendors} & C.ICS_VENDORS else 0
 
 
-def enrich(store: MonthStore, kev: dict, epss: dict, ics_cves: set | None = None):
+def enrich(store: MonthStore, kev: dict, epss: dict, ics_cves: set | None = None,
+           exploits: dict | None = None):
     store.load_all()
     ics_cves = ics_cves or set()
+    exploits = exploits or {}
     for key, month in store.cache.items():
         changed = False
         for rec in month.values():
@@ -613,6 +615,8 @@ def enrich(store: MonthStore, kev: dict, epss: dict, ics_cves: set | None = None
                 "ransomware": 1 if k and k["ransomware"] == "Known" else 0,
                 "ics": 1 if (_is_ot(rec) or rec["id"] in ics_cves) else 0,
             }
+            if rec["id"] in exploits:
+                new["exp"] = exploits[rec["id"]]
             if epss:
                 e = epss.get(rec["id"])
                 new["epss"] = round(e[0], 5) if e else None
@@ -719,6 +723,47 @@ def sync_news() -> list[dict]:
     return news
 
 
+def sync_exploits() -> dict:
+    """Mapea CVE -> exploits públicos listos para usar.
+    {CVE: {"m": [módulos Metasploit], "n": "ruta/template/nuclei"}}.
+    Fuentes: Metasploit (modules_metadata_base.json) y Nuclei (cves.json)."""
+    emap: dict[str, dict] = {}
+    # Metasploit
+    try:
+        data = json.loads(http_get(C.EXPLOIT_MSF, retries=2, timeout=60))
+        for mod in data.values():
+            full = mod.get("fullname", "")
+            for ref in mod.get("references", []) or []:
+                ref = str(ref).upper()
+                if ref.startswith("CVE-"):
+                    e = emap.setdefault(ref, {})
+                    e.setdefault("m", [])
+                    if full and full not in e["m"] and len(e["m"]) < 5:
+                        e["m"].append(full)
+        log(f"Exploits: Metasploit {sum('m' in v for v in emap.values())} CVEs")
+    except Exception as e:
+        log(f"Exploits: fallo Metasploit: {e}")
+    # Nuclei (JSONL: un objeto por línea)
+    try:
+        n = 0
+        for line in http_get(C.EXPLOIT_NUCLEI, retries=2, timeout=60).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            cid = str(obj.get("ID", "")).upper()
+            if cid.startswith("CVE-"):
+                emap.setdefault(cid, {})["n"] = obj.get("file_path", "")
+                n += 1
+        log(f"Exploits: Nuclei {n} templates")
+    except Exception as e:
+        log(f"Exploits: fallo Nuclei: {e}")
+    return emap
+
+
 def sync_ics() -> set:
     """Descarga los avisos de CISA ICS-CERT, los guarda en ics.json y devuelve el
     conjunto de CVE-IDs que mencionan (para reforzar el marcado OT)."""
@@ -748,7 +793,85 @@ def sync_ics() -> set:
 # ---------------------------------------------------------------------------
 # Resúmenes para la web
 # ---------------------------------------------------------------------------
-def build_summary(store: MonthStore, meta: dict, kev_new: list[str], nvd_new: list[str]):
+def _priority(r: dict) -> int:
+    """Misma fórmula que el frontend: CVSS + EPSS + explotación."""
+    p = (r.get("score") or 0) * 4 + (r.get("epss") or 0) * 45
+    if r.get("kev"):
+        p += 60
+    elif r.get("exploit") == "active":
+        p += 45
+    elif r.get("exploit") == "poc":
+        p += 15
+    if r.get("ransomware"):
+        p += 15
+    return round(p)
+
+
+def _is_urgent(r: dict) -> bool:
+    return bool(r.get("kev") or r.get("exploit") == "active" or _priority(r) >= 70)
+
+
+def build_api(recent: list[dict], site_url: str = ""):
+    """Expone los CVE prioritarios como API pública: JSON + RSS, para que otros
+    los consuman. Genera site/api/{urgent,latest}.json y site/api/feed.xml."""
+    api = C.DATA.parent / "api"
+    api.mkdir(parents=True, exist_ok=True)
+    base = (site_url or "").rstrip("/")
+
+    def row(r):
+        d = {
+            "id": r["id"], "published": r.get("published", ""),
+            "severity": r.get("severity"), "cvss": r.get("score"),
+            "epss": r.get("epss"), "kev": bool(r.get("kev")),
+            "ransomware": bool(r.get("ransomware")), "ics": bool(r.get("ics")),
+            "priority": _priority(r), "description": (r.get("desc") or "")[:300],
+        }
+        if r.get("exp"):
+            d["exploit"] = {"metasploit": r["exp"].get("m", []), "nuclei": bool(r["exp"].get("n"))}
+        if base:
+            d["url"] = f"{base}/#/cve/{r['id']}"
+        return d
+
+    urgent = sorted((r for r in recent if _is_urgent(r)), key=_priority, reverse=True)[:C.API_FEED_MAX]
+    latest = sorted(recent, key=lambda r: r.get("published", ""), reverse=True)[:C.API_FEED_MAX]
+    write_json(api / "urgent.json", {"generated": iso(NOW), "count": len(urgent), "items": [row(r) for r in urgent]})
+    write_json(api / "latest.json", {"generated": iso(NOW), "count": len(latest), "items": [row(r) for r in latest]})
+
+    # RSS de los CVE urgentes (suscribible en cualquier lector)
+    def rss_item(r):
+        link = f"{base}/#/cve/{r['id']}" if base else f"https://nvd.nist.gov/vuln/detail/{r['id']}"
+        sev = r.get("severity") or "—"
+        title = _esc_xml(f"{r['id']} · {sev} · prioridad {_priority(r)}")
+        desc = _esc_xml((r.get("desc") or "")[:400])
+        try:
+            pub = parsedate_fmt(parse_dt(r.get("published", "")))
+        except Exception:
+            pub = ""
+        return (f"<item><title>{title}</title><link>{_esc_xml(link)}</link>"
+                f"<guid isPermaLink=\"false\">{_esc_xml(r['id'])}</guid>"
+                f"<pubDate>{pub}</pubDate><description>{desc}</description></item>")
+
+    items = "".join(rss_item(r) for r in urgent[:50])
+    rss = ('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>'
+           '<title>VulnWatch — CVEs urgentes</title>'
+           f'<link>{_esc_xml(base or "https://github.com")}</link>'
+           '<description>Vulnerabilidades prioritarias (explotadas o de alto riesgo), actualizadas cada hora.</description>'
+           f'<lastBuildDate>{parsedate_fmt(NOW)}</lastBuildDate>{items}</channel></rss>')
+    (api / "feed.xml").write_text(rss, encoding="utf-8")
+    log(f"API: {len(urgent)} urgentes, {len(latest)} recientes (JSON + RSS)")
+
+
+def _esc_xml(s):
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def parsedate_fmt(dt):
+    from email.utils import format_datetime
+    return format_datetime(dt)
+
+
+def build_summary(store: MonthStore, meta: dict, kev_new: list[str], nvd_new: list[str], site_url: str = ""):
     store.load_all()
     months, sev_total = [], {}
     recent, cutoff = [], iso(NOW - timedelta(days=14))
@@ -766,6 +889,10 @@ def build_summary(store: MonthStore, meta: dict, kev_new: list[str], nvd_new: li
         months.append({"month": key, "count": len(rows), "severity": sev})
     recent.sort(key=lambda r: r["published"], reverse=True)
     write_json(C.DATA / "recent.json", recent)
+    try:
+        build_api(recent, site_url)
+    except Exception as e:
+        log(f"API: ERROR {e}")
 
     history = meta.get("history", [])
     today = NOW.strftime("%Y-%m-%d")
@@ -869,21 +996,26 @@ def main():
 
     kev, kev_new = sync_kev()
     epss = sync_epss()
-    ics_cves = set()
+    ics_cves, exploits = set(), {}
     if not a.skip_news:
         try:
             ics_cves = sync_ics()
         except Exception as e:
             errors.append(f"ICS: {e}")
             log(f"ICS: ERROR {e}")
-    enrich(store, kev, epss, ics_cves)
+        try:
+            exploits = sync_exploits()
+        except Exception as e:
+            errors.append(f"Exploits: {e}")
+            log(f"Exploits: ERROR {e}")
+    enrich(store, kev, epss, ics_cves, exploits)
     store.save()
 
     if not a.skip_news:
         sync_news()
 
     meta["errors"] = errors
-    build_summary(store, meta, kev_new, nvd_new)
+    build_summary(store, meta, kev_new, nvd_new, a.site_url)
     alerts(store, kev, kev_new, nvd_new, a.site_url)
     log("Listo.")
     return 1 if errors and not meta.get("total_cves") else 0

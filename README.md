@@ -30,6 +30,7 @@ VulnWatch answers that by combining several public sources into one prioritized 
 | Public exploit / PoC | CISA Vulnrichment (SSVC) | `none` / `poc` / `active` |
 | Exploitation probability | [FIRST EPSS](https://www.first.org/epss/) | Probability of exploitation in the next 30 days |
 | Industrial (OT/ICS) | [CISA ICS-CERT advisories](https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml) | Which CVEs affect control systems (SCADA, PLCs, RTUs) |
+| Ready-to-use exploits | [Metasploit](https://github.com/rapid7/metasploit-framework) + [Nuclei templates](https://github.com/projectdiscovery/nuclei-templates) | Whether weaponized code already exists |
 | Context | 12 security news feeds (RSS/Atom) | News linked to the CVEs they mention |
 
 ## Features
@@ -38,6 +39,8 @@ VulnWatch answers that by combining several public sources into one prioritized 
 - **Full CVE explorer:** full-text search, filters (severity, KEV, exploit/PoC, ransomware, EPSS threshold, watchlist), column sorting, month-by-month history and CSV export.
 - **CVE detail:** CVSS vector, EPSS score and percentile, KEV data, affected products, CWE, references, related news, and a one-click search for public PoCs on GitHub.
 - **OT / ICS edition:** a dedicated industrial-security view that tracks **CISA ICS-CERT advisories** and flags every CVE affecting an industrial vendor (Siemens, Schneider Electric, Rockwell, Hitachi Energy, ABB…) with an `OT/ICS` tag and filter. Rare among CVE dashboards and built for critical-infrastructure / utility teams.
+- **Exploit availability:** flags CVEs that have a ready-to-use exploit — a **Metasploit** module or a **Nuclei** template — with an `EXPLOIT READY` tag and filter, plus direct links and one-click searches on Exploit-DB, GitHub and Sploitus. Answers *"is there weaponized code for this?"*, not just *"is it being exploited?"*.
+- **Public API / feed:** the prioritized data is published as open endpoints — `api/urgent.json`, `api/latest.json` and an `api/feed.xml` RSS feed — so other tools can consume it or you can subscribe from any RSS reader.
 - **Asset matching (by version):** load your real stack as `product version` (e.g. `apache:http_server 2.4.49`) and VulnWatch tells you exactly which CVEs affect it, matching your version against NVD's **vulnerable version ranges (CPE)** — not plain text. Answers the question that matters: *does this affect my systems?* The asset list stays in your browser.
 - **Watchlist:** track the vendors and products in your scope by keyword. Matching CVEs are highlighted everywhere, and you can mark CVEs as reviewed.
 - **Optional Telegram alerts:** new KEV entries, critical CVEs and watchlist matches.

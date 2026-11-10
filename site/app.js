@@ -23,7 +23,7 @@ const S = {
   watch: store.get("watch", []),
   assets: store.get("assets", []),
   reviewed: new Set(store.get("reviewed", [])),
-  f: Object.assign({q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, hideRev:false, epss:0, src:"recent", sort:"published", dir:-1, page:0}, store.get("filters", {})),
+  f: Object.assign({q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, exp:false, hideRev:false, epss:0, src:"recent", sort:"published", dir:-1, page:0}, store.get("filters", {})),
 };
 S.f.page = 0;
 
@@ -104,6 +104,7 @@ function assetHit(r) {
 }
 const isAffected = r => !!assetHit(r);
 const isOT = r => !!r.ics;
+const hasExploit = r => !!(r.exp && (r.exp.m?.length || r.exp.n));
 function cpeTxt(e) {
   if (e.v) return esc(e.p + " " + e.v);
   const b = [];
@@ -128,6 +129,7 @@ function tags(r) {
   if (r.kev) t += `<span class="tag kev" title="En el catálogo KEV de CISA: explotada activamente">EXPLOTADA</span>`;
   if (!r.kev && r.exploit === "active") t += `<span class="tag kev" title="CISA indica explotación activa (SSVC)">EXPLOTADA</span>`;
   if (r.exploit === "poc") t += `<span class="tag poc" title="Existe código de ataque público (PoC) según CISA">PoC PÚBLICO</span>`;
+  if (hasExploit(r)) t += `<span class="tag exp" title="Existe un exploit listo para usar (Metasploit o Nuclei)">EXPLOIT LISTO</span>`;
   if (r.origin === "cve.org") t += `<span class="tag new" title="Recién publicada en CVE.org, todavía sin análisis de la NVD">NUEVA</span>`;
   if (r.ransomware) t += `<span class="tag rw" title="Usada en campañas de ransomware">RANSOMWARE</span>`;
   if (isOT(r)) t += `<span class="tag ot" title="Afecta a sistemas de control industrial (OT/ICS)">OT/ICS</span>`;
@@ -281,6 +283,7 @@ function filtered() {
     if (f.watch && !isWatched(r)) return false;
     if (f.aff && !isAffected(r)) return false;
     if (f.ot && !isOT(r)) return false;
+    if (f.exp && !hasExploit(r)) return false;
     if (f.hideRev && S.reviewed.has(r.id)) return false;
     if (terms.length) {
       const hay = (r.id + " " + (r.title || "") + " " + r.desc + " " + (r.products || []).join(" ") + " " + (r.cwe || []).join(" ")).toLowerCase();
@@ -320,6 +323,7 @@ views.cves = () => {
     <label class="ck"><input type="checkbox" id="fwatch" ${f.watch ? "checked" : ""}> Mi lista</label>
     <label class="ck"><input type="checkbox" id="faff" ${f.aff ? "checked" : ""}> Afecta a mis activos</label>
     <label class="ck"><input type="checkbox" id="fot" ${f.ot ? "checked" : ""}> OT / ICS</label>
+    <label class="ck"><input type="checkbox" id="fexp" ${f.exp ? "checked" : ""}> Exploit listo</label>
     <label class="ck"><input type="checkbox" id="frev" ${f.hideRev ? "checked" : ""}> Ocultar revisadas</label>
     <label class="ck">EPSS ≥ <input type="number" id="fepss" min="0" max="100" step="1" value="${f.epss}" style="width:64px">%</label>
     <button class="btn" id="fclear">Limpiar</button>
@@ -361,9 +365,9 @@ function bindCves() {
     f.src = "loaded"; f.page = 0; save();
   });
   $("#fsev").addEventListener("click", e => { const s = e.target.dataset.s; if (!s) return; f.sev = f.sev.includes(s) ? f.sev.filter(x => x !== s) : [...f.sev, s]; f.page = 0; save(); });
-  for (const [id, k] of [["#fkev", "kev"], ["#fpoc", "poc"], ["#frw", "rw"], ["#fwatch", "watch"], ["#faff", "aff"], ["#fot", "ot"], ["#frev", "hideRev"]]) $(id).addEventListener("change", e => { f[k] = e.target.checked; f.page = 0; save(); });
+  for (const [id, k] of [["#fkev", "kev"], ["#fpoc", "poc"], ["#frw", "rw"], ["#fwatch", "watch"], ["#faff", "aff"], ["#fot", "ot"], ["#fexp", "exp"], ["#frev", "hideRev"]]) $(id).addEventListener("change", e => { f[k] = e.target.checked; f.page = 0; save(); });
   $("#fepss").addEventListener("change", e => { f.epss = +e.target.value || 0; f.page = 0; save(); });
-  $("#fclear").addEventListener("click", () => { Object.assign(f, {q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, hideRev:false, epss:0, page:0}); save(); });
+  $("#fclear").addEventListener("click", () => { Object.assign(f, {q:"", sev:[], kev:false, rw:false, poc:false, watch:false, aff:false, ot:false, exp:false, hideRev:false, epss:0, page:0}); save(); });
   $("#fcsv").addEventListener("click", () => exportCSV(filtered()));
   document.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
     const k = th.dataset.sort; if (f.sort === k) f.dir *= -1; else { f.sort = k; f.dir = k === "id" ? 1 : -1; } f.page = 0; save();
@@ -548,6 +552,13 @@ views.config = () => `
     <h2 style="margin-top:24px">Estado de los datos</h2>
     <p class="note">Última actualización: ${fmtDT(S.meta?.updated)} UTC · CVEs en base: ${(S.meta?.total_cves || 0).toLocaleString("es-AR")} · meses: ${(S.meta?.months || []).length} · KEV: ${S.kev.items.length} · noticias: ${S.news.length}</p>
     <p class="note">La lista y las marcas se guardan sólo en este navegador. Para recibir alertas por Telegram con tu lista, configurá la variable <span class="mono">WATCHLIST</span> en GitHub (ver README).</p>
+    <h2 style="margin-top:24px">API / feed público 📡</h2>
+    <p class="note">VulnWatch expone los CVE prioritarios como datos abiertos, para integrarlos con otras herramientas o suscribirte desde un lector:</p>
+    <ul class="refs">
+      <li><a href="api/urgent.json" target="_blank" rel="noopener">api/urgent.json</a> — CVEs urgentes (explotados o alto riesgo), con prioridad, EPSS, KEV y exploits.</li>
+      <li><a href="api/latest.json" target="_blank" rel="noopener">api/latest.json</a> — los más recientes.</li>
+      <li><a href="api/feed.xml" target="_blank" rel="noopener">api/feed.xml</a> — feed RSS de los urgentes (pegalo en cualquier lector de RSS).</li>
+    </ul>
   </div>`;
 function bindConfig() {
   $("#wlsave").addEventListener("click", () => {
@@ -590,6 +601,16 @@ async function openCVE(id) {
     ${k ? `<h3>Explotación activa (CISA KEV)</h3><div class="kevbox"><b>${esc(k.name)}</b><br>
       Agregada el ${fmtDate(k.added)} · plazo de remediación ${fmtDate(k.due)} · ransomware: ${k.ransomware === "Known" ? "<b>SÍ</b>" : "desconocido"}<br>
       <span class="note">Acción requerida: ${esc(k.action)}</span></div>` : ""}
+    <h3>Exploits públicos</h3>
+    ${hasExploit(x) ? `<div class="expbox">
+      ${x.exp.m?.length ? `<div class="exprow"><b>🎯 Metasploit:</b> ${x.exp.m.map(m => `<a class="tag exp" target="_blank" rel="noopener" href="https://www.rapid7.com/db/modules/${esc(m)}/">${esc(m)}</a>`).join(" ")}</div>` : ""}
+      ${x.exp.n ? `<div class="exprow"><b>⚡ Nuclei:</b> <a class="tag exp" target="_blank" rel="noopener" href="https://github.com/projectdiscovery/nuclei-templates/blob/main/${esc(x.exp.n)}">${esc(x.exp.n.split("/").pop())}</a></div>` : ""}
+    </div>` : `<p class="note">No se encontró un módulo listo de Metasploit ni template de Nuclei. Buscá PoCs manualmente:</p>`}
+    <div class="actions" style="margin-top:8px">
+      <a class="btn" target="_blank" rel="noopener" href="https://www.exploit-db.com/search?cve=${esc(x.id)}">Buscar en Exploit-DB</a>
+      <a class="btn" target="_blank" rel="noopener" href="https://github.com/search?q=${esc(x.id)}&type=repositories">PoC en GitHub (repos)</a>
+      <a class="btn" target="_blank" rel="noopener" href="https://sploitus.com/?query=${esc(x.id)}">Buscar en Sploitus</a>
+    </div>
     ${(x.products || []).length ? `<h3>Productos afectados</h3><div class="chips">${x.products.map(p => `<span class="tag">${esc(p.replace(":", " · "))}</span>`).join("")}</div>` : ""}
     ${(x.cwe || []).length ? `<h3>Debilidad (CWE)</h3><div class="chips">${x.cwe.map(c => `<a class="tag" target="_blank" rel="noopener" href="https://cwe.mitre.org/data/definitions/${esc(c.replace("CWE-", ""))}.html">${esc(c)}</a>`).join("")}</div>` : ""}
     ${news.length ? `<h3>Noticias relacionadas</h3>${news.map(newsHTML).join("")}` : ""}

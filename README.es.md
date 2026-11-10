@@ -13,6 +13,8 @@ Panel web para ver **todas las vulnerabilidades (CVE)** del día, cuáles se est
 | **Explotadas (KEV)** | Catálogo completo de CISA con plazos de remediación y uso en ransomware |
 | **Noticias** | 12 fuentes RSS (en inglés y en español); los CVEs que mencionan se abren con un clic |
 | **OT / ICS** | Vista dedicada a seguridad industrial: sigue los **avisos de CISA ICS-CERT** y marca con la etiqueta `OT/ICS` cada CVE que afecta a un proveedor industrial (Siemens, Schneider, Rockwell, Hitachi Energy, ABB…). Pensada para infraestructura crítica y distribuidoras |
+| **Exploits públicos** | Marca con `EXPLOIT LISTO` los CVE que ya tienen un exploit usable (módulo de **Metasploit** o template de **Nuclei**), con link directo y búsquedas en Exploit-DB, GitHub y Sploitus. Responde *¿hay código listo?*, no solo *¿se está explotando?* |
+| **API / feed** | Los CVE prioritarios se publican como datos abiertos: `api/urgent.json`, `api/latest.json` y un RSS `api/feed.xml` para integrar o suscribirte |
 | **Mis activos** | Cargá tu stack con **versión** (ej. `apache:http_server 2.4.49`) y cruza cada CVE contra los **rangos de versiones vulnerables (CPE) de la NVD** — no por texto. Te dice exactamente qué te afecta. La lista queda sólo en tu navegador |
 | **Mi lista** | Tus productos/proveedores por palabra clave: se resaltan en todo el sitio. Marcar CVEs como "revisadas" |
 | **Detalle de CVE** | CVSS, EPSS, info KEV, productos, CWE, referencias, noticias relacionadas, búsqueda de PoC |

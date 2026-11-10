@@ -213,5 +213,35 @@ class TestOT(unittest.TestCase):
         self.assertEqual(F._is_ot({}), 0)
 
 
+class TestExploitsAPI(unittest.TestCase):
+    def test_priority_and_urgent(self):
+        self.assertTrue(F._is_urgent({"kev": 1}))
+        self.assertTrue(F._is_urgent({"exploit": "active"}))
+        self.assertFalse(F._is_urgent({"score": 5.0}))
+        self.assertGreater(F._priority({"score": 9.8, "epss": 0.9, "kev": 1}),
+                           F._priority({"score": 5.0}))
+
+    def test_build_api_writes(self):
+        import tempfile
+        recent = [
+            {"id": "CVE-2026-1", "published": "2026-10-01T00:00:00", "severity": "CRITICAL",
+             "score": 9.8, "epss": 0.9, "kev": 1, "desc": "x", "exp": {"m": ["exploit/a"], "n": "http/cves/x.yaml"}},
+            {"id": "CVE-2026-2", "published": "2026-10-02T00:00:00", "severity": "LOW", "score": 2.0, "desc": "y"},
+        ]
+        old = C.DATA
+        C.DATA = Path(tempfile.mkdtemp()) / "site" / "data"
+        C.DATA.mkdir(parents=True)
+        try:
+            F.build_api(recent, "https://example.test")
+            api = C.DATA.parent / "api"
+            urgent = json.loads((api / "urgent.json").read_text())
+            self.assertEqual(urgent["items"][0]["id"], "CVE-2026-1")          # el urgente arriba
+            self.assertIn("exploit", urgent["items"][0])                      # trae los exploits
+            self.assertEqual(urgent["count"], 1)                             # el LOW no es urgente
+            self.assertTrue((api / "feed.xml").read_text().startswith("<?xml"))
+        finally:
+            C.DATA = old
+
+
 if __name__ == "__main__":
     unittest.main()

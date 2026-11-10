@@ -55,6 +55,10 @@ h1{font-size:22px;margin:0 0 4px} h2{font-size:15px;margin:0;font-weight:600}
 .tag.aff{background:#ff4d6d;border-color:#ff4d6d;color:#fff;font-weight:700}
 .tag.ot{background:#0284c7;border-color:#0284c7;color:#fff;font-weight:700}
 .kpi.ot .val{color:#38bdf8}
+.tag.exp{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:700}
+.expbox{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:6px 0}
+.exprow{margin:6px 0;font-size:14px;line-height:1.9}
+.expbox a.tag.exp{font-weight:600}
 .tag.new{background:#4cc9f022;border-color:var(--low);color:var(--low)}
 .prio{display:inline-block;min-width:66px;text-align:center;font-size:11px;font-weight:700;padding:2px 6px;border-radius:5px}
 .prio.p4{background:var(--crit);color:#fff}.prio.p3{background:#ff8c4233;color:var(--high)}.prio.p2{background:#f2c94c22;color:var(--med)}.prio.p1{background:var(--bg2);color:var(--tx3)}
