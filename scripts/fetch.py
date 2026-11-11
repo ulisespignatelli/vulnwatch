@@ -770,9 +770,13 @@ def sync_ics() -> set:
     old = read_json(C.DATA / "ics.json", [])
     by_link = {a["link"]: a for a in old}
     ok = 0
+    # CISA (Akamai) bloquea User-Agents de bot con 403; usamos uno de navegador.
+    ua_browser = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
     for source, url in C.ICS_FEEDS:
         try:
-            got = parse_feed(source, http_get(url, retries=2, timeout=30))
+            got = parse_feed(source, http_get(url, retries=2, timeout=30,
+                                              headers={"User-Agent": ua_browser}))
             for a in got:
                 by_link.setdefault(a["link"], a)
             ok += 1
