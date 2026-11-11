@@ -454,11 +454,11 @@ views.ot = () => {
   const adv = (S.ics || []).slice(0, 12);
   return `
   <h1>Seguridad OT / ICS 🏭</h1>
-  <p class="sub">Vulnerabilidades en sistemas de control industrial (SCADA, PLCs, RTUs) y los avisos de <b>CISA ICS-CERT</b>. Un CVE se marca <span class="tag ot">OT/ICS</span> si afecta a un proveedor industrial (Siemens, Schneider, Rockwell, Hitachi Energy…) o lo referencia un aviso ICS.</p>
+  <p class="sub">Vulnerabilidades en sistemas de control industrial (SCADA, PLCs, RTUs) y los avisos de <b>CISA ICS-CERT</b> (o, si CISA no está accesible, derivados de las CVEs OT/ICS de NVD). Un CVE se marca <span class="tag ot">OT/ICS</span> si afecta a un proveedor industrial (Siemens, Schneider, Rockwell, Hitachi Energy…) o lo referencia un aviso ICS.</p>
   <div class="grid kpis">
     <div class="card kpi ot"><div class="lbl">OT · últimos 14 días</div><div class="val">${otRecent.length}</div><div class="hint">${ot7.length} en 7 días</div></div>
     <div class="card kpi kev"><div class="lbl">OT explotadas</div><div class="val">${otKev.length}</div><div class="hint">KEV o explotación activa</div></div>
-    <div class="card kpi"><div class="lbl">Avisos CISA ICS</div><div class="val">${(S.ics || []).length}</div><div class="hint">en el feed</div></div>
+    <div class="card kpi"><div class="lbl">Avisos OT/ICS</div><div class="val">${(S.ics || []).length}</div><div class="hint">CISA + NVD</div></div>
   </div>
   <div class="grid cols">
     <div>
@@ -468,7 +468,7 @@ views.ot = () => {
         : '<p class="note">No hay CVEs OT en los datos recientes. Probá el explorador con el filtro «OT / ICS» y «Cargar historial completo».</p>'}
     </div>
     <div>
-      <h2>Últimos avisos de CISA ICS-CERT</h2>
+      <h2>Últimos avisos OT/ICS</h2>
       ${adv.length ? adv.map(a => `<a class="news" href="${safeUrl(a.link)}" target="_blank" rel="noopener">
           <div class="t">${esc(a.title)}</div>
           <div class="s">${esc(a.source)} · hace ${ago(a.date)}</div>

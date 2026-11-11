@@ -764,11 +764,40 @@ def sync_exploits() -> dict:
     return emap
 
 
-def sync_ics() -> set:
-    """Descarga los avisos de CISA ICS-CERT, los guarda en ics.json y devuelve el
-    conjunto de CVE-IDs que mencionan (para reforzar el marcado OT)."""
+def _ics_from_cves(store: "MonthStore") -> list:
+    """Deriva avisos OT/ICS de las CVEs ya recolectadas (NVD/CVE.org).
+    Fuente de respaldo cuando el feed de CISA está inaccesible (Akamai bloquea
+    las IP de los runners de GitHub Actions con 403)."""
+    store.load_all()
+    cutoff = iso(NOW - timedelta(days=C.ICS_MAX_AGE_DAYS))
+    out = []
+    for month in store.cache.values():
+        for r in month.values():
+            if r.get("published", "") < cutoff or not _is_ot(r):
+                continue
+            vendors = {e.get("p", "").split(":")[0] for e in r.get("cpe", [])}
+            vendors |= {p.split(":")[0] for p in r.get("products", [])}
+            vendor = next((v for v in vendors if _norm(v) in C.ICS_VENDORS), "")
+            title = r.get("title") or r["id"]
+            if vendor and _norm(vendor) not in _norm(title):
+                title = f"{vendor.replace('_', ' ').title()} — {title}"
+            out.append({
+                "source": "NVD · OT/ICS",
+                "title": title[:200],
+                "link": f"https://nvd.nist.gov/vuln/detail/{r['id']}",
+                "date": r.get("published") or iso(NOW),
+                "cves": [r["id"]],
+            })
+    out.sort(key=lambda a: a["date"], reverse=True)
+    return out[:C.ICS_MAX]
+
+
+def sync_ics(store: "MonthStore" = None) -> set:
+    """Reúne avisos OT/ICS y los guarda en ics.json; devuelve el conjunto de
+    CVE-IDs mencionados (para reforzar el marcado OT). Intenta primero el feed
+    oficial de CISA; si está bloqueado, deriva los avisos de las CVEs OT/ICS."""
     old = read_json(C.DATA / "ics.json", [])
-    by_link = {a["link"]: a for a in old}
+    by_link = {a["link"]: a for a in old if a.get("source", "").startswith("CISA")}
     ok = 0
     # CISA (Akamai) bloquea User-Agents de bot con 403; usamos uno de navegador.
     ua_browser = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -786,8 +815,12 @@ def sync_ics() -> set:
     cutoff = iso(NOW - timedelta(days=C.ICS_MAX_AGE_DAYS))
     adv = sorted((a for a in by_link.values() if a["date"] >= cutoff),
                  key=lambda a: a["date"], reverse=True)[:C.ICS_MAX]
+    if not adv and store is not None:
+        # CISA inaccesible: usamos las CVEs OT/ICS de NVD como respaldo.
+        adv = _ics_from_cves(store)
+        log(f"ICS: CISA sin datos; {len(adv)} avisos derivados de CVEs OT/ICS")
     write_json(C.DATA / "ics.json", adv)
-    log(f"ICS: {len(adv)} avisos guardados ({ok}/{len(C.ICS_FEEDS)} fuentes OK)")
+    log(f"ICS: {len(adv)} avisos guardados ({ok}/{len(C.ICS_FEEDS)} fuentes CISA OK)")
     cve_ids = set()
     for a in adv:
         cve_ids.update(a.get("cves", []))
@@ -1003,7 +1036,7 @@ def main():
     ics_cves, exploits = set(), {}
     if not a.skip_news:
         try:
-            ics_cves = sync_ics()
+            ics_cves = sync_ics(store)
         except Exception as e:
             errors.append(f"ICS: {e}")
             log(f"ICS: ERROR {e}")

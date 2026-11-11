@@ -212,6 +212,23 @@ class TestOT(unittest.TestCase):
         self.assertEqual(F._is_ot({"products": ["apache:http server"]}), 0)
         self.assertEqual(F._is_ot({}), 0)
 
+    def test_ics_fallback_from_cves(self):
+        # Cuando CISA está inaccesible, el panel OT/ICS se deriva de las CVEs.
+        s = F.MonthStore()
+        recent = F.iso(F.NOW)[:19]
+        s.upsert({"id": "CVE-2026-9001", "published": recent, "title": "Fallo RCE",
+                  "cpe": [{"p": "siemens:simatic_s7"}], "products": []})
+        s.upsert({"id": "CVE-2026-9002", "published": recent, "title": "Fallo web",
+                  "cpe": [{"p": "microsoft:windows_11"}], "products": []})  # no OT
+        adv = F._ics_from_cves(s)
+        ids = {a["cves"][0] for a in adv}
+        self.assertIn("CVE-2026-9001", ids)      # el industrial entra
+        self.assertNotIn("CVE-2026-9002", ids)   # el no-industrial no
+        a = next(a for a in adv if a["cves"][0] == "CVE-2026-9001")
+        self.assertEqual(a["source"], "NVD · OT/ICS")
+        self.assertIn("Siemens", a["title"])
+        self.assertIn("CVE-2026-9001", a["link"])
+
 
 class TestExploitsAPI(unittest.TestCase):
     def test_priority_and_urgent(self):
